@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="es">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MULTILANGUE+</title>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="css/style.css">
+    <link rel="stylesheet" href="css/video_room.css">
+    <script src="/socket.io/socket.io.js"></script>
+</head>
+
+<body>
+
+    <div id="notification-area" style="position: fixed; top: 20px; right: 20px; z-index: 2000;"></div>
+
+    <!-- Login/Register -->
+    <section id="auth-screen" class="auth-container">
+        <div class="auth-box">
+            <div class="auth-header">
+                <img src="assets/logo.png" class="auth-logo" alt="Logo">
+                <h1 class="auth-title">MULTILANGUE+</h1>
+            </div>
+
+            <div id="login-form">
+                <div class="auth-input-group">
+                    <input type="email" id="login-email" placeholder=" " required>
+                    <label>Correo Electrónico</label>
+                </div>
+                <div class="auth-input-group" style="position:relative;">
+                    <input type="password" id="login-pass" placeholder=" " required style="padding-right:40px;">
+                    <label>Contraseña</label>
+                    <button type="button" onclick="togglePassVisibility('login-pass')"
+                        style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:white; cursor:pointer;">👁️</button>
+                </div>
+                <button class="btn-auth" id="btn-login">INGRESAR</button>
+                <a href="#" id="link-register" class="auth-link">¿No tienes cuenta? Regístrate</a>
+            </div>
+
+            <div id="register-form" class="hidden">
+                <div class="auth-input-group">
+                    <input type="text" id="reg-name" placeholder=" " required>
+                    <label>Nombre Completo</label>
+                </div>
+                <div class="auth-input-group">
+                    <input type="email" id="reg-email" placeholder=" " required>
+                    <label>Email</label>
+                </div>
+                <div class="auth-input-group">
+                    <input type="tel" id="reg-phone" placeholder=" " required>
+                    <label>Teléfono</label>
+                </div>
+                <div class="auth-input-group">
+                    <input type="text" id="reg-dni" placeholder=" " required>
+                    <label>Cédula/DNI</label>
+                </div>
+                <div class="auth-input-group">
+                    <input type="number" id="reg-age" placeholder=" " required min="5" max="100">
+                    <label>Edad</label>
+                </div>
+                <div class="auth-input-group" style="position:relative;">
+                    <input type="password" id="reg-pass" placeholder=" " required style="padding-right:40px;">
+                    <label>Contraseña</label>
+                    <button type="button" onclick="togglePassVisibility('reg-pass')"
+                        style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:white; cursor:pointer;">👁️</button>
+                </div>
+                <div class="auth-input-group" style="position:relative;">
+                    <input type="password" id="reg-pass-conf" placeholder=" " required style="padding-right:40px;">
+                    <label>Repetir Contraseña</label>
+                    <button type="button" onclick="togglePassVisibility('reg-pass-conf')"
+                        style="position:absolute; right:10px; top:50%; transform:translateY(-50%); background:none; border:none; color:white; cursor:pointer;">👁️</button>
+                </div>
+                <button class="btn-auth" id="btn-register">REGISTRARSE</button>
+                <a href="#" id="link-login" class="auth-link">Volver al Ingreso</a>
+            </div>
+        </div>
+    </section>
+
+    <!-- Main App -->
+    <section id="dashboard" class="hidden" style="display:flex; height:100vh; width:100%;">
+
+        <!-- SIDEBAR -->
+        <aside class="sidebar">
+            <div class="logo-container">
+                <img src="assets/logo.png" class="logo-img">
+                <div class="brand-title">MULTILANGUE+</div>
+                <div class="brand-subtitle" id="user-role-display">ADMIN</div>
+            </div>
+
+            <nav class="nav-menu">
+                <a class="nav-btn active" id="nav-home">🏠 Inicio</a>
+                <a class="nav-btn hidden" id="nav-enroll">📝 Inscribirme</a>
+                <a class="nav-btn" id="nav-courses">📚 Cursos</a>
+
+                <div id="admin-links" class="hidden" style="display:flex; flex-direction:column; gap:1rem;">
+                    <a class="nav-btn" id="nav-professors">👨‍🏫 Profesores</a>
+                    <a class="nav-btn" id="nav-students">🎓 Estudiantes</a>
+                </div>
+            </nav>
+
+            <div style="margin-top:auto">
+                <a class="nav-btn" id="nav-logout" style="color:#ef4444; border:1px solid rgba(239,68,68,0.2)">
+                    🚪 Cerrar Sesión
+                </a>
+            </div>
+        </aside>
+
+        <!-- CONTENT -->
+        <main class="main-content">
+            <header style="display:flex; justify-content:space-between; align-items:center; margin-bottom:2rem;">
+                <h2 id="page-title">Bienvenido</h2>
+                <div style="display:flex; align-items:center; gap:1.5rem;">
+                    <div id="admin-notifs" class="hidden" style="position:relative; cursor:pointer;"
+                        onclick="openPendingUsersModal()">
+                        <span style="font-size:1.5rem;">🔔</span>
+                        <span id="notif-badge"
+                            style="position:absolute; top:-5px; right:-5px; background:red; color:white; font-size:0.7rem; padding:2px 6px; border-radius:10px; font-weight:bold; display:none;">0</span>
+                    </div>
+                    <div id="user-info"></div>
+                </div>
+            </header>
+            <div id="content-area"></div>
+        </main>
+
+    </section>
+
+    <!-- Video Room -->
+    <div id="video-room" class="hidden video-room-layout">
+        <!-- Main Video Area -->
+        <div class="video-main">
+            <div class="video-header">
+                <h3>🔴 Clase en Vivo</h3>
+                <!-- Button removed, moved to bottom bar -->
+            </div>
+
+            <div class="video-grid-container" id="video-grid">
+                <!-- Local Video -->
+                <div class="video-wrapper">
+                    <video id="local-video" autoplay muted playsinline></video>
+                    <span class="video-label">Tú</span>
+                </div>
+            </div>
+
+            <div class="video-controls-bar">
+                <button class="control-btn" onclick="toggleMute()" id="btn-mute" title="Mutear/Desmutear">
+                    <!-- Icon Mic -->
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" class="icon-mic" stroke="currentColor"
+                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
+                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
+                        <line x1="12" y1="19" x2="12" y2="23"></line>
+                        <line x1="8" y1="23" x2="16" y2="23"></line>
+                    </svg>
+                    <!-- Icon Mute Off (hidden by default) -->
+                </button>
+                <button class="control-btn" onclick="toggleVideo()" id="btn-video" title="Cámara On/Off">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M23 7l-7 5 7 5V7z"></path>
+                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
+                    </svg>
+                </button>
+                <button class="control-btn" onclick="shareScreen()" id="btn-share" title="Compartir Pantalla">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M2 3h20v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3z"></path>
+                        <path d="M8 21h8"></path>
+                        <path d="M12 17v4"></path>
+                    </svg>
+                </button>
+                <button class="control-btn danger" onclick="toggleRecording()" id="btn-rec" title="Grabar Clase"
+                    style="color:white">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"></path>
+                        <circle cx="12" cy="12" r="3" fill="currentColor"></circle>
+                    </svg>
+                </button>
+                <button class="control-btn" onclick="toggleSidebar()" id="btn-sidebar" title="Chat y Participantes">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
+                    </svg>
+                </button>
+                <button class="control-btn hangup" onclick="leaveRoom()" title="Colgar Llamada">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+                        stroke-linecap="round" stroke-linejoin="round">
+                        <path
+                            d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91">
+                        </path>
+                        <line x1="23" y1="1" x2="1" y2="23"></line>
+                    </svg>
+                </button>
+            </div>
+        </div>
+
+        <!-- Right Sidebar -->
+        <div class="video-sidebar" id="video-sidebar">
+            <div class="sidebar-tabs">
+                <button class="tab-btn active" onclick="switchVideoTab('chat')">Chat</button>
+                <button class="tab-btn" onclick="switchVideoTab('participants')">Participantes</button>
+            </div>
+
+            <div id="v-tab-chat" class="sidebar-content">
+                <div id="chat-messages" class="chat-messages">
+                    <!-- Messages go here -->
+                </div>
+                <div class="chat-input-area">
+                    <input type="text" id="chat-input" placeholder="Escribe un mensaje...">
+                </div>
+            </div>
+
+            <div id="v-tab-participants" class="sidebar-content hidden">
+                <h4 style="color:var(--secondary); margin-bottom:1rem; font-size:0.9rem;">En esta llamada</h4>
+                <div id="list-connected" class="participant-list"></div>
+
+                <h4 style="color:#64748b; margin:1rem 0 0.5rem; font-size:0.9rem;">Ausentes</h4>
+                <div id="list-absent" class="participant-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="js/api.js"></script>
+    <script src="js/webrtc.js"></script>
+    <script src="js/app.js"></script>
+</body>
+
+</html>
