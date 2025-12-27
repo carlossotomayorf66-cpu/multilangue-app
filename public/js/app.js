@@ -246,7 +246,7 @@ async function loadView(view) {
 
                 content.innerHTML = `
                     <div class="home-hero">
-                        <h1 class="hero-title">MULTILANGUE+</h1>
+                        <h1 class="hero-title notranslate" translate="no">MULTILANGUE+</h1>
                         <p style="margin-bottom:2rem; color:var(--text-muted);">Bienvenido a tu plataforma de aprendizaje.</p>
                         
                         <div class="glass-card" style="max-width:600px; margin:0 auto; text-align:left; border-left:4px solid var(--primary); padding:2rem;">
@@ -265,7 +265,7 @@ async function loadView(view) {
             // Admin / Professor View
             content.innerHTML = `
                 <div class="home-hero">
-                    <h1 class="hero-title">MULTILANGUE+</h1>
+                    <h1 class="hero-title notranslate" translate="no">MULTILANGUE+</h1>
                     <p class="founder-info">Fundador: <strong>Carlos Sotomayor</strong></p>
                     <div style="margin-bottom:2rem"><span class="year-badge">EST 2025</span></div>
                     

@@ -44,7 +44,14 @@ async function startVideoCall(roomId, userName) {
 
 function toggleSidebar() {
     const sidebar = document.getElementById('video-sidebar');
+    const btn = document.getElementById('btn-sidebar');
+
     sidebar.classList.toggle('collapsed');
+
+    // Reset alert color if opening
+    if (!sidebar.classList.contains('collapsed')) {
+        btn.style.background = '';
+    }
 }
 
 function switchVideoTab(tab) {
@@ -295,8 +302,15 @@ socket.on('answer', async (payload) => {
     if (pc) await pc.setRemoteDescription(payload.sdp);
 });
 
-socket.on('ice-candidate', (candidate) => {
-    // TODO: Manejar candidatos ICE para P2P real
+socket.on('ice-candidate', async (payload) => {
+    const pc = peers[payload.caller];
+    if (pc && payload.candidate) {
+        try {
+            await pc.addIceCandidate(payload.candidate);
+        } catch (e) {
+            console.error('Error adding ICE candidate', e);
+        }
+    }
 });
 
 socket.on('user-disconnected', (userId) => {
@@ -329,7 +343,11 @@ function createPeerConnection(targetId) {
 
     pc.onicecandidate = (event) => {
         if (event.candidate) {
-            socket.emit('ice-candidate', { target: targetId, candidate: event.candidate });
+            socket.emit('ice-candidate', {
+                target: targetId,
+                caller: currentUser.id, // Add caller ID
+                candidate: event.candidate
+            });
         }
     };
 

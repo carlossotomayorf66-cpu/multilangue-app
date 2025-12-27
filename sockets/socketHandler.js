@@ -5,6 +5,7 @@ module.exports = (io) => {
         // Unirse a una sala de clase
         socket.on('join-room', (roomId, userId, userName) => {
             socket.join(roomId);
+            socket.join(String(userId)); // Allow private messaging
             socket.to(roomId).emit('user-connected', userId, userName);
 
             socket.on('disconnect', () => {
@@ -15,15 +16,15 @@ module.exports = (io) => {
         // Señalización WebRTC
         socket.on('offer', (payload) => {
             // payload: { target, caller, sdp }
-            io.to(payload.target).emit('offer', payload);
+            io.to(String(payload.target)).emit('offer', payload);
         });
 
         socket.on('answer', (payload) => {
-            io.to(payload.target).emit('answer', payload);
+            io.to(String(payload.target)).emit('answer', payload);
         });
 
         socket.on('ice-candidate', (incoming) => {
-            io.to(incoming.target).emit('ice-candidate', incoming.candidate);
+            io.to(String(incoming.target)).emit('ice-candidate', incoming);
         });
 
         // Chat
