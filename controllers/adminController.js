@@ -168,3 +168,19 @@ exports.getAllCourses = async (req, res) => {
         res.status(500).json({ success: false, message: error.message });
     }
 };
+
+exports.updateCourse = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { name, schedule_description, teacher_id } = req.body;
+
+        await pool.query(
+            'UPDATE courses SET name = ?, schedule_description = ?, teacher_id = ? WHERE id = ?',
+            [name, schedule_description, teacher_id, id]
+        );
+
+        res.json({ success: true, message: 'Curso actualizado correctamente' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};

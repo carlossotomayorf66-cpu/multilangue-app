@@ -312,6 +312,7 @@ async function loadView(view) {
             ]);
 
             const courses = resCourses.data || [];
+            window.currentCourses = courses; // Store for editing
             const langs = resLangs.data || [];
 
             // Empty State for Professors
@@ -328,12 +329,13 @@ async function loadView(view) {
 
             let html = `
                 <div style="display:flex; justify-content:space-between; margin-bottom:1.5rem; align-items:center;">
+                    ${currentUser.role === 'ADMIN' ? `
                     <select id="filter-lang" class="input-group" style="width:200px; margin:0;" onchange="filterCourses()">
                         <option value="all">🌐 Todos</option>
                         ${langs.map(l => `<option value="${l.name}">${l.name}</option>`).join('')}
                     </select>
-                    ${currentUser.role === 'ADMIN' ?
-                    `<button class="btn btn-primary" onclick="showCreateCourseModal()">+ Nuevo Curso</button>` : ''}
+                    <button class="btn btn-primary" onclick="showCreateCourseModal()">+ Nuevo Curso</button>
+                    ` : ''}
                 </div>
                 
                 <div class="card-grid" id="courses-grid">
@@ -344,7 +346,7 @@ async function loadView(view) {
                                     ${c.language_name || c.language}
                                 </span>
                                 ${currentUser.role === 'ADMIN' ?
-                            `<span style="background:rgba(255,255,255,0.1); padding:2px 8px; border-radius:4px; font-size:0.8rem;">👥 ${c.student_count || 0}</span>` : ''}
+                    `<span style="background:rgba(255,255,255,0.1); padding:2px 8px; border-radius:4px; font-size:0.8rem;">👥 ${c.student_count || 0}</span>` : ''}
                             </div>
                             <h3 style="font-size:1.3rem; margin-bottom:0.5rem;">${c.name}</h3>
                             <p style="color:#94a3b8; font-size:0.9rem; margin-bottom:1rem;">📅 ${c.schedule_description || 'Sin horario'}</p>
@@ -352,7 +354,7 @@ async function loadView(view) {
                             
                             <div style="display:flex; gap:0.5rem;">
                                 <button class="btn btn-primary" style="flex:1" onclick="enterCourse(${c.id})">Entrar</button>
-                                ${currentUser.role === 'ADMIN' ? `<button class="btn btn-secondary">✏️</button>` : ''}
+                                ${currentUser.role === 'ADMIN' ? `<button class="btn btn-secondary" onclick="editCourse(${c.id})">✏️</button>` : ''}
                             </div>
                         </div>
                     `).join('') : '<p style="grid-column:1/-1; text-align:center; padding:2rem; color:gray;">No se encontraron cursos activos.</p>'}
@@ -501,42 +503,28 @@ function filterCourses() {
 // Full Course Detail View
 // Full Course Detail View
 async function enterCourse(courseId) {
+    window.currentCourseId = courseId; // Track state
     const content = document.getElementById('content-area');
     content.innerHTML = '<p>Cargando aula...</p>';
 
     try {
         const res = await apiRequest(`/v1/courses/${courseId}`);
         const { course, units } = res.data;
+        window.currentUnits = units; // Track units for editing
 
         const pageTitle = document.getElementById('page-title');
         if (pageTitle) pageTitle.innerText = course.name;
 
-        // 1. Fetch RECORDINGS
-        let recordingsMsg = '<p>Cargando grabaciones...</p>';
+        // 1. HOMEWORK / ASSIGNMENTS
+        let assignments = [];
         try {
-            const resRec = await apiRequest(`/v1/courses/${courseId}/recordings`);
-            const recordings = resRec.data || [];
-            if (recordings.length === 0) {
-                recordingsMsg = '<div class="glass-card"><p>No hay grabaciones disponibles.</p></div>';
-            } else {
-                recordingsMsg = `<div class="glass-card">
-                    <p style="color:var(--text-muted); font-size:0.9rem; margin-bottom:1rem;">
-                        ℹ️ Grabaciones de clases anteriores.
-                    </p>
-                    ${recordings.map(r => `
-                        <div style="display:flex; justify-content:space-between; align-items:center; padding:0.8rem; border-bottom:1px solid rgba(255,255,255,0.05);">
-                            <div>
-                                <div style="font-weight:bold;">${r.filename}</div>
-                                <div style="font-size:0.8rem; color:#94a3b8;">${new Date(r.recorded_at).toLocaleString()}</div>
-                            </div>
-                            <div style="display:flex; gap:1rem; align-items:center;">
-                                <a href="${r.url}" target="_blank" class="btn btn-secondary" style="padding:0.3rem 0.6rem; text-decoration:none;">▶️ Ver / Descargar</a>
-                            </div>
-                        </div>
-                    `).join('')}
-                </div>`;
-            }
-        } catch (e) { recordingsMsg = `<p style="color:red">Error cargando grabaciones</p>`; }
+            // Fetch assignments for everyone
+            const resAss = await apiRequest(`/v1/courses/${courseId}/assignments`);
+            assignments = resAss.data || [];
+            window.currentAssignments = assignments;
+        } catch (e) { console.error('Error fetching assignments', e); }
+
+        let homeworkMsg = '<div id="homework-area">Cargando...</div>';
 
         // 2. Fetch MATERIALS
         let materialsMsg = '';
@@ -572,125 +560,147 @@ async function enterCourse(courseId) {
             `;
         } catch (e) { console.error('Error fetching materials', e); }
 
+        // Top Nav
+        const nav = `
+            <div style="display:flex; gap:1rem; margin-bottom:2rem; overflow-x:auto;">
+                <button class="nav-btn active" onclick="switchTab('activities')">🧩 Actividades</button>
+                <button class="nav-btn" onclick="switchTab('progress')">📊 Progreso</button>
+                <button class="nav-btn" onclick="switchTab('materials')">📚 Materiales</button>
+                <button class="nav-btn" onclick="switchTab('homework')">📝 Deberes</button>
+                ${currentUser.role === 'PROFESOR' || currentUser.role === 'ADMIN' ? '<button class="nav-btn" onclick="switchTab(\'attendance\')">📋 Asistencia</button>' : ''}
+            </div>
+            <style>
+                .nav-btn {
+                    background: rgba(255,255,255,0.05);
+                    border: 1px solid rgba(255,255,255,0.1);
+                    color: #cbd5e1;
+                    padding: 0.8rem 1.5rem;
+                    border-radius: 12px;
+                    cursor: pointer;
+                    font-size: 1rem;
+                    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+                    display: flex; align-items: center; gap: 0.5rem;
+                }
+                .nav-btn:hover {
+                    background: rgba(255,255,255,0.1);
+                    transform: translateY(-2px);
+                    box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+                    border-color: var(--primary);
+                    color: white;
+                }
+                .nav-btn.active {
+                    background: var(--primary);
+                    color: white;
+                    border-color: var(--primary);
+                    box-shadow: 0 0 15px rgba(99,102,241,0.4);
+                }
+                .progress-bar-container { background:rgba(255,255,255,0.1); border-radius:10px; height:20px; width:100%; overflow:hidden; margin-top:0.5rem; position:relative; }
+                .progress-bar { height:100%; transition:width 1s ease-in-out; display:flex; align-items:center; justify-content:center; font-size:0.7rem; font-weight:bold; color:white; text-shadow:0 1px 2px rgba(0,0,0,0.5); }
+                .bg-gray { background:#475569; width:0%; }
+                .bg-red { background:#ef4444; }
+                .bg-yellow { background:#eab308; }
+                .bg-green { background:#10b981; }
+            </style>
+        `;
+
+        // Helper to switch tabs
+        window.switchTab = (tabName) => {
+            // Update buttons
+            document.querySelectorAll('.nav-btn').forEach(btn => btn.classList.remove('active'));
+            const activeBtn = document.querySelector(`button[onclick="switchTab('${tabName}')"]`);
+            if (activeBtn) activeBtn.classList.add('active');
+
+            // Hide all tab contents
+            ['activities', 'progress', 'materials', 'homework', 'attendance'].forEach(t => {
+                const el = document.getElementById(`tab-${t}`);
+                if (el) el.classList.add('hidden');
+            });
+
+            // Show selected tab
+            const target = document.getElementById(`tab-${tabName}`);
+            if (target) {
+                target.classList.remove('hidden');
+                if (tabName === 'attendance') loadAttendanceHistory(courseId);
+            }
+        };
+
         // 3. Render HTML
         content.innerHTML = `
-            <div style="display:grid; grid-template-columns: 2fr 1fr; gap:2rem;">
-                
-                <!-- LEFT COLUMN -->
-                <div>
-                    <div style="display:flex; align-items:center; gap:1rem; margin-bottom:2rem; background:rgba(0,0,0,0.2); padding:1rem; border-radius:1rem;">
-                        <button class="btn btn-primary" onclick="startVideoCall('${courseId}', '${currentUser.full_name}')" style="box-shadow: 0 0 20px rgba(99,102,241,0.5);">
-                            📹 <strong>ENTRAR A CLASE EN VIVO</strong>
-                        </button>
-                    </div>
+            <div style="max-width:1200px; margin:0 auto;">
+                <button class="btn btn-secondary" style="margin-bottom:2rem;" onclick="loadView('courses')">← Volver al Panel</button>
+                <h2 style="font-size:2rem; margin-bottom:1.5rem; color:white;">${course.name}</h2>
+                ${nav}
 
-                    <!-- TABS -->
-                    <div style="margin-bottom:1rem; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:0.5rem; display:flex; gap:0.5rem;">
-                        <button class="btn btn-secondary" onclick="switchTab('materials')">📚 Materiales</button>
-                        <button class="btn btn-secondary" onclick="switchTab('activities')">🧩 Actividades</button>
-                        <button class="btn btn-secondary" onclick="switchTab('recordings')">📼 Grabaciones</button>
-                        ${currentUser.role === 'PROFESOR' || currentUser.role === 'ADMIN' ? '<button class="btn btn-secondary" onclick="switchTab(\'attendance\')">📋 Asistencia</button>' : ''}
-                    </div>
-
-                    <!-- TAB CONTENT: MATERIALS -->
-                    <div id="tab-materials">
-                        ${materialsMsg}
-                    </div>
-
-                    <!-- TAB CONTENT: ACTIVITIES -->
-                    <!-- TAB CONTENT: ACTIVITIES -->
-                    <div id="tab-activities" class="hidden">
-                        <div style="margin-bottom:1.5rem; display:flex; justify-content:space-between; align-items:center;">
-                            <h3 style="color:var(--primary);">Actividades de Aprendizaje</h3>
-                            ${currentUser.role === 'ADMIN' || currentUser.role === 'PROFESOR' ?
-                `<div style="display:flex; gap:0.5rem;">
-                                    ${units.length === 0 ?
-                    ((course.language_name || '').includes('Francés') ?
-                        `<script>setTimeout(()=>scaffoldUnits(${courseId}, true), 500);</script><span style="font-size:0.8rem; color:gray;">Autogenerando...</span>`
-                        : `<button class="btn btn-secondary" onclick="scaffoldUnits(${courseId})">⚡ Generar Unidades</button>`)
-                    : ''}
-                                    <button class="btn btn-primary" onclick="showCreateUnitModal(${courseId})">+ Nueva Unidad</button>
-                                 </div>` : ''}
-                        </div>
-
-                        ${units.length === 0 ? `
-                            <div class="glass-card" style="text-align:center; padding:3rem;">
-                                <p style="color:#cbd5e1; font-size:1.1rem;">Este curso aún no tiene contenido configurado.</p>
-                                ${currentUser.role === 'ADMIN' || currentUser.role === 'PROFESOR' ? '<p style="color:gray; font-size:0.9rem; margin-top:0.5rem;">Usa "Nueva Unidad" o "Generar Unidades" para comenzar.</p>' : ''}
-                            </div>
-                        ` : ''}
+                <div style="display:grid; grid-template-columns: 3fr 1fr; gap:2rem;">
+                    
+                    <div style="min-width:0;">
                         
-                        <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap:1.5rem;">
-                            ${units.map(u => `
-                                <div class="glass-card-hover" style="
-                                    padding:2rem 1rem; 
-                                    border:1px solid rgba(255,255,255,0.1); 
-                                    border-radius:1rem; 
-                                    text-align:center; 
-                                    background: linear-gradient(135deg, rgba(255,255,255,0.08), rgba(255,255,255,0.02)); 
-                                    cursor:pointer;
-                                    transition: all 0.3s ease;
-                                    display:flex; flex-direction:column; align-items:center; justify-content:center;
-                                " 
-                                onclick='openUnitDetails(${JSON.stringify(u).replace(/'/g, "&apos;").replace(/"/g, "&quot;")})'
-                                onmouseover="this.style.transform='translateY(-5px)'; this.style.borderColor='var(--primary)';" 
-                                onmouseout="this.style.transform='translateY(0)'; this.style.borderColor='rgba(255,255,255,0.1)';"
-                                >
-                                    <div style="font-size:2.5rem; margin-bottom:1rem; text-shadow: 0 0 20px rgba(255,255,255,0.3);">📖</div>
-                                    <div style="font-weight:bold; font-size:1.1rem; color:white;">${u.title.split(':')[0]}</div>
-                                    <div style="font-size:0.8rem; color:var(--text-muted); margin-top:0.5rem;">${u.title.split(':')[1] || 'Débutant'}</div>
-                                </div>
-                            `).join('')}
+                        <!-- TAB CONTENT: ACTIVITIES -->
+                        <div id="tab-activities"> 
+                            ${renderUnits(units)}
                         </div>
-                    </div>
 
-                    <!-- TAB CONTENT: RECORDINGS -->
-                    <div id="tab-recordings" class="hidden">
-                        ${recordingsMsg}
-                    </div>
+                        <!-- TAB CONTENT: PROGRESS -->
+                        <div id="tab-progress" class="hidden">
+                            <div id="progress-content-area">
+                                <p style="text-align:center; color:gray;">Cargando progreso...</p>
+                            </div>
+                        </div>
 
-                    <!-- TAB CONTENT: ATTENDANCE (Real) -->
-                    <div id="tab-attendance" class="hidden">
-                        <div style="display:grid; grid-template-columns: 1fr 250px; gap:1.5rem;">
-                            <!-- Main Attendance Area -->
-                            <div class="glass-card">
-                                <h3>Registro de Asistencia</h3>
-                                <div style="display:flex; gap:1rem; align-items:center; margin-bottom:1rem;">
-                                    <input type="date" id="att-date" class="input-group" style="max-width:200px; margin:0;" value="${new Date().toISOString().split('T')[0]}">
-                                    <button class="btn btn-secondary" onclick="loadAttendanceList(${courseId})">Cargar Lista</button>
+                        <!-- TAB CONTENT: MATERIALS -->
+                        <div id="tab-materials" class="hidden">
+                            ${materialsMsg}
+                        </div>
+
+                        <!-- TAB CONTENT: HOMEWORK (Rename from recordings) -->
+                        <div id="tab-homework" class="hidden">
+                            ${homeworkMsg}
+                        </div>
+
+                        <!-- TAB CONTENT: ATTENDANCE -->
+                        <div id="tab-attendance" class="hidden">
+                             <div style="display:grid; grid-template-columns: 1fr 250px; gap:1.5rem;">
+                                <!-- Main Attendance Area -->
+                                <div class="glass-card">
+                                    <h3>Registro de Asistencia</h3>
+                                    <div style="display:flex; gap:1rem; align-items:center; margin-bottom:1rem;">
+                                        <input type="date" id="att-date" class="input-group" style="max-width:200px; margin:0;" value="${new Date().toISOString().split('T')[0]}">
+                                        <button class="btn btn-secondary" onclick="loadAttendanceList(${courseId})">Cargar Lista</button>
+                                    </div>
+                                    <div id="attendance-list-area">
+                                        <p style="color:gray">Selecciona fecha y carga lista...</p>
+                                    </div>
                                 </div>
-                                <div id="attendance-list-area">
-                                    <p style="color:gray">Selecciona fecha y carga lista...</p>
+
+                                <!-- Historial Fechas -->
+                                <div class="glass-card" style="height:fit-content; background: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.1);">
+                                    <h4 style="font-size:1.1rem; color:var(--primary); margin-bottom:1rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom:0.5rem;">📅 Historial</h4>
+                                    <div id="att-history-list" style="display:flex; flex-direction:column; gap:0.8rem; max-height:450px; overflow-y:auto; padding-right:5px;">
+                                        <p style="font-size:0.8rem; text-align:center;">Cargando...</p>
+                                    </div>
                                 </div>
                             </div>
+                        </div>
 
-                            <!-- Historial Fechas (Enhanced) -->
-                            <div class="glass-card" style="height:fit-content; background: linear-gradient(135deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01)); border: 1px solid rgba(255,255,255,0.1);">
-                                <h4 style="font-size:1.1rem; color:var(--primary); margin-bottom:1rem; border-bottom: 1px solid rgba(255,255,255,0.1); padding-bottom:0.5rem;">📅 Historial</h4>
-                                <div id="att-history-list" style="display:flex; flex-direction:column; gap:0.8rem; max-height:450px; overflow-y:auto; padding-right:5px;">
-                                    <p style="font-size:0.8rem; text-align:center;">Cargando...</p>
-                                </div>
-                            </div>
+                    </div>
+
+                    <!-- RIGHT COLUMN info -->
+                    <div style="display:flex; flex-direction:column; gap:1rem;">
+                        <div class="glass-card">
+                            <h4 style="margin-bottom:0.8rem; color:var(--primary);">Info Curso</h4>
+                            <p style="margin-bottom:0.5rem"><strong>Nivel:</strong> ${course.name}</p>
+                            <p style="margin-bottom:0.5rem"><strong>Idioma:</strong> ${course.language_name || 'N/A'}</p>
+                            <p style="margin-bottom:0.5rem"><strong>Horario:</strong> ${course.schedule_description || '-'}</p>
+                            <p style="margin-bottom:0.5rem"><strong>Profesor:</strong> ${course.teacher_name || '-'}</p>
                         </div>
                     </div>
 
                 </div>
-
-                <!-- RIGHT COLUMN info -->
-                <div style="display:flex; flex-direction:column; gap:1rem;">
-                    <div class="glass-card">
-                        <h4 style="margin-bottom:0.8rem; color:var(--primary);">Info Curso</h4>
-                        <p style="margin-bottom:0.5rem"><strong>Idioma:</strong> ${course.language_name || 'N/A'}</p>
-                        <p style="margin-bottom:0.5rem"><strong>Horario:</strong> ${course.schedule_description || '-'}</p>
-                        <p style="margin-bottom:0.5rem"><strong>Profesor:</strong> ${course.teacher_name || '-'}</p>
-                    </div>
-                </div>
-
             </div>
         `;
 
-        // Load History
-        window.loadAttendanceHistory(courseId);
+        // Load Progress
+        loadCourseProgress(courseId);
 
     } catch (e) {
         content.innerHTML = `<p style="color:red">Error: ${e.message}</p>`;
@@ -698,9 +708,152 @@ async function enterCourse(courseId) {
     }
 }
 
+// === PROGRESS LOGIC ===
+async function loadCourseProgress(courseId) {
+    const area = document.getElementById('progress-content-area');
+    if (!area) return; // Tab might not be rendered yet if logic order changes, but it is in HTML string above
+
+    try {
+        const res = await apiRequest(`/v1/courses/${courseId}/progress`);
+        const data = res.data || [];
+        window.currentCourseProgress = data; // Store globally for Student List
+
+        renderHomeworkTab(courseId); // Initial render of homework tab content
+
+        if (data.length === 0) {
+            area.innerHTML = '<div class="glass-card"><p>No hay datos de progreso disponibles.</p></div>';
+            return;
+        }
+
+        if (currentUser.role === 'ESTUDIANTE') {
+            // -- VISTA ESTUDIANTE --
+            // Solo sus propias unidades
+            const studentData = data[0]; // Backend returns array with 1 item for student
+            if (!studentData) return;
+
+            let html = '<div class="glass-card">';
+            html += `<h3 style="margin-bottom:1.5rem; color:var(--primary);">Tu Progreso</h3>`;
+
+            html += renderUnitBars(studentData.units, `stu-${studentData.student_id}`);
+            html += '</div>';
+
+            area.innerHTML = html;
+
+        } else {
+            // -- VISTA ADMIN / PROF --
+            // Lista de estudiantes
+            let html = `
+                <div class="glass-card">
+                    <h3 style="margin-bottom:1rem;">Progreso de Estudiantes</h3>
+                    <div style="display:flex; flex-direction:column; gap:1rem;">
+            `;
+
+            data.forEach(student => {
+                const uniqueId = `prog-${student.student_id}`;
+                html += `
+                    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(255,255,255,0.1); border-radius:8px; padding:1rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-weight:bold; font-size:1.1rem;">${student.full_name}</div>
+                                <div style="font-size:0.8rem; color:#94a3b8;">${student.email}</div>
+                            </div>
+                            <button class="btn btn-primary" onclick="toggleStudentProgress('${uniqueId}')">
+                                Ver Progreso
+                            </button>
+                        </div>
+                        
+                        <div id="${uniqueId}" class="hidden" style="display:none; margin-top:1.5rem; border-top:1px solid rgba(255,255,255,0.1); padding-top:1rem;">
+                            <!-- Render Bars Here -->
+                            ${renderUnitBars(student.units, uniqueId)}
+                        </div>
+                    </div>
+                `;
+            });
+
+            html += '</div></div>';
+            area.innerHTML = html;
+        }
+
+    } catch (e) {
+        console.error("Error loading progress", e);
+        area.innerHTML = `<p style="color:red">Error cargando progreso: ${e.message}</p>`;
+    }
+}
+
+function renderUnitBars(units, baseId) {
+    if (!units || units.length === 0) return '<p>No hay unidades.</p>';
+
+    let html = '<div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap:1.5rem;">';
+
+    units.forEach((unit, idx) => {
+        // Color logic
+        let color = '#94a3b8'; // gray
+        if (unit.status === 'red') color = '#ef4444';
+        else if (unit.status === 'yellow') color = '#eab308';
+        else if (unit.status === 'green') color = '#22c55e';
+
+        const detailsId = `${baseId}-unit-${unit.unit_id}`;
+
+        html += `
+            <div style="background:rgba(0,0,0,0.2); border-radius:8px; padding:1rem;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.5rem;">
+                    <span style="font-weight:bold; font-size:0.9rem;">${unit.unit_title}</span>
+                    <button onclick="toggleElement('${detailsId}')" style="background:none; border:none; color:white; cursor:pointer;">
+                        ▼
+                    </button>
+                </div>
+
+                <!-- Barra -->
+                <div style="background:#334155; height:10px; border-radius:5px; overflow:hidden; margin-bottom:0.5rem;">
+                    <div style="background:${color}; width:${unit.percentage}%; height:100%;"></div>
+                </div>
+                <div style="text-align:right; font-size:0.8rem; color:${color}; font-weight:bold;">${unit.percentage}%</div>
+
+                <!-- Detalles (Drill-down) -->
+                <div id="${detailsId}" class="hidden" style="margin-top:1rem; font-size:0.85rem;">
+                    ${unit.details.length === 0 ? '<p style="color:gray;">Sin actividad.</p>' : ''}
+                    ${unit.details.map(act => `
+                        <div style="margin-bottom:0.5rem; border-bottom:1px solid rgba(255,255,255,0.05); padding-bottom:0.3rem;">
+                            <div style="color:white; margin-bottom:2px;">${act.activity_title}</div>
+                            <div style="display:flex; justify-content:space-between; color:#94a3b8; font-size:0.75rem;">
+                                <span>${act.submitted_at ? new Date(act.submitted_at).toLocaleDateString() : 'Pendiente'}</span>
+                                <span style="color:${act.grade >= 70 ? '#22c55e' : (act.submitted_at ? '#ef4444' : 'gray')}">
+                                    ${act.submitted_at ? Math.round(act.grade) + '/100' : '-'}
+                                </span>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+        `;
+    });
+
+    html += '</div>';
+    return html;
+}
+
+window.toggleStudentProgress = (id) => {
+    console.log("toggleStudentProgress called for:", id);
+    const el = document.getElementById(id);
+    if (!el) return console.error("Element not found:", id);
+
+    if (el.style.display === 'none') {
+        el.style.display = 'block';
+        el.classList.remove('hidden');
+    } else {
+        el.style.display = 'none';
+        el.classList.add('hidden');
+    }
+};
+
+window.toggleElement = (id) => {
+    const el = document.getElementById(id);
+    if (el) el.classList.toggle('hidden');
+};
+
 // === WINDOW FUNCTIONS FOR COURSE VIEW ===
 window.switchTab = function (tabName) {
-    ['materials', 'activities', 'recordings', 'attendance'].forEach(t => {
+    ['materials', 'activities', 'recordings', 'attendance', 'progress'].forEach(t => {
         const el = document.getElementById(`tab-${t}`);
         if (el) {
             el.classList.toggle('hidden', t !== tabName);
@@ -1116,98 +1269,210 @@ async function showCreateCourseModal() {
         // Filter only professors
         const teachers = (resUsers.data || []).filter(u => u.role === 'PROFESOR');
 
-        // Append Modal HTML to body if not exists, or just show it? 
-        // Better: render it as an overlay
-        let modal = document.getElementById('modal-overlay');
-        if (!modal) {
-            modal = document.createElement('div');
-            modal.id = 'modal-overlay';
-            modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:2000; display:flex; justify-content:center; align-items:center;';
-            document.body.appendChild(modal);
-        }
+        let modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:2000; display:flex; justify-content:center; align-items:center;';
 
         modal.innerHTML = `
             <div class="glass-card" style="width:100%; max-width:500px; position:relative;">
-                <button onclick="document.getElementById('modal-overlay').remove()" style="position:absolute; top:1rem; right:1rem; background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;">&times;</button>
+                <button onclick="this.closest('.modal-overlay').remove()" style="position:absolute; top:1rem; right:1rem; background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;">&times;</button>
                 <h3 style="margin-bottom:1.5rem; color:var(--primary);">Crear Nuevo Curso</h3>
                 
                 <div class="input-group">
-                    <label>Nombre de la clase</label>
-                    <input id="course-name" list="course-levels" placeholder="Ej. Francés A1">
-                    <datalist id="course-levels">
-                        <option value="Francés A1">
-                        <option value="Francés A2">
-                        <option value="Francés B1">
-                        <option value="Francés B2">
-                        <option value="Inglés A1">
-                        <option value="Inglés A2">
-                        <option value="Inglés B1">
-                        <option value="Inglés B2">
-                        <option value="Portugués A1">
-                        <option value="Portugués A2">
-                        <option value="Portugués B1">
-                        <option value="Portugués B2">
-                    </datalist>
+                    <label>Nombre del Curso</label>
+                    <input type="text" id="new-course-name" placeholder="Ej: Francés A1">
                 </div>
-                
                 <div class="input-group">
                     <label>Idioma</label>
-                    <select id="course-lang">
+                    <select id="new-course-lang" style="background:rgba(0,0,0,0.3); color:white; border:1px solid rgba(255,255,255,0.1); padding:0.8rem; border-radius:8px; width:100%;">
                         ${langs.map(l => `<option value="${l.id}">${l.name}</option>`).join('')}
                     </select>
                 </div>
-                
                 <div class="input-group">
-                    <label>Profesor Asignado</label>
-                    <select id="course-teacher">
-                        <option value="">-- Seleccionar --</option>
+                    <label>Nivel (Opcional)</label>
+                    <input type="text" id="new-course-level" placeholder="Ej: B1">
+                </div>
+                <div class="input-group">
+                    <label>Instructor</label>
+                    <select id="new-course-instructor" style="background:rgba(0,0,0,0.3); color:white; border:1px solid rgba(255,255,255,0.1); padding:0.8rem; border-radius:8px; width:100%;">
                         ${teachers.map(t => `<option value="${t.id}">${t.full_name}</option>`).join('')}
                     </select>
                 </div>
-                
                 <div class="input-group">
-                    <label>Descripción de Horario</label>
-                    <input id="course-schedule" placeholder="Ej. Lun-Mie 18:00 - 20:00">
+                    <label>Descripción</label>
+                    <textarea id="new-course-desc" rows="3" placeholder="Breve descripción..."></textarea>
                 </div>
 
                 <div style="display:flex; justify-content:flex-end; gap:1rem; margin-top:2rem;">
-                    <button class="btn btn-secondary" onclick="document.getElementById('modal-overlay').remove()">Cancelar</button>
-                    <button class="btn btn-primary" onclick="saveCourse()">Guardar Curso</button>
+                    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+                    <button class="btn btn-primary" onclick="createCourseAction()">Crear Curso</button>
                 </div>
             </div>
         `;
+        document.body.appendChild(modal);
 
     } catch (e) { alert(e.message); }
 }
 
-async function saveCourse() {
-    const name = document.getElementById('course-name').value;
-    const language_id = document.getElementById('course-lang').value;
-    const teacher_id = document.getElementById('course-teacher').value;
-    const schedule_description = document.getElementById('course-schedule').value;
+window.createCourseAction = async () => {
+    const name = document.getElementById('new-course-name').value;
+    const langId = document.getElementById('new-course-lang').value;
+    const instructorId = document.getElementById('new-course-instructor').value;
+    const level = document.getElementById('new-course-level').value;
+    const desc = document.getElementById('new-course-desc').value;
 
-    if (!name || !teacher_id || !schedule_description) return alert('Por favor completa todos los campos');
+    if (!name) return alert('El nombre es obligatorio');
 
     try {
-        const today = new Date().toISOString().split('T')[0]; // YYYY-MM-DD
-        const nextYear = new Date(new Date().setFullYear(new Date().getFullYear() + 1)).toISOString().split('T')[0];
-
         await apiRequest('/v1/courses', 'POST', {
-            name,
-            language_id,
-            teacher_id,
-            schedule_description,
-            start_date: today,
-            end_date: nextYear
+            name, language_id: langId, instructor_id: instructorId, level, description: desc
         });
+        document.querySelector('.modal-overlay').remove();
+        renderDashboard(); // Refresh
+    } catch (e) { alert(e.message); }
+};
 
-        alert('✅ Curso creado exitosamente');
-        document.getElementById('modal-overlay').remove();
-        loadView('courses'); // Refresh list
-    } catch (e) {
-        alert('❌ Error: ' + e.message);
+// --- Progress Logic ---
+window.loadProgressTab = async (courseId) => {
+    try {
+        const res = await apiRequest(`/v1/courses/${courseId}/progress`);
+        const container = document.getElementById('progress-container');
+        const data = res.data;
+
+        if (data.length === 0) {
+            container.innerHTML = '<p style="text-align:center; color:gray;">No hay datos de progreso.</p>';
+            return;
+        }
+
+        const studentData = data[0];
+
+        container.innerHTML = `
+            <h2 style="margin-bottom:1.5rem;">Tu Progreso</h2>
+            <div style="display:grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap:1.5rem;">
+                ${studentData.units.map(u => `
+                    <div class="glass-card" style="padding:1.5rem;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem; cursor:pointer;" onclick="toggleProgressDetails(${u.unit_id})">
+                            <h3 style="margin:0; font-size:1.1rem;">${u.unit_title}</h3>
+                            <div style="transform:rotate(0deg); transition:transform 0.3s;" id="arrow-${u.unit_id}">▼</div>
+                        </div>
+                        
+                        <div class="progress-bar-container">
+                            <div class="progress-bar bg-${u.status}" style="width:${u.percentage}%"></div>
+                            <span style="position:absolute; width:100%; text-align:center; top:0; line-height:20px; color:white; text-shadow:0 0 4px black;">${u.percentage}%</span>
+                        </div>
+
+                        <div id="details-${u.unit_id}" style="display:none; margin-top:1.5rem; border-top:1px solid rgba(255,255,255,0.1); padding-top:1rem;">
+                            ${u.details.map(d => `
+                                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:0.8rem; font-size:0.95rem;">
+                                    <span style="color:#cbd5e1;">${d.activity_title}</span>
+                                    <div style="display:flex; gap:0.5rem; align-items:center;">
+                                        <span style="
+                                            color:${d.status === 'COMPLETED' ? '#4ade80' : (d.status === 'IN_PROGRESS' ? '#facc15' : 'gray')}; 
+                                            font-weight:bold;
+                                        ">
+                                            ${d.status === 'COMPLETED' ? (d.grade !== null ? d.grade.toFixed(0) + '/100' : 'Completado') :
+                (d.status === 'IN_PROGRESS' ? 'En Progreso (' + Math.round(d.progress_percentage || 0) + '%)' : '-')}
+                                        </span>
+                                        ${d.status === 'COMPLETED' && d.type === 'QUIZ' ?
+                `<button onclick="reviewActivity(${d.activity_id})" style="background:rgba(99,102,241,0.2); border:1px solid rgba(99,102,241,0.5); color:white; border-radius:4px; cursor:pointer; font-size:0.7rem; padding:2px 8px; transition:all 0.2s;">Ver Respuestas</button>`
+                : ''}
+                                    </div>
+                                </div>
+                            `).join('')}
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+
+    } catch (e) { console.error(e); }
+};
+
+window.toggleProgressDetails = (uid) => {
+    const d = document.getElementById(`details-${uid}`);
+    const a = document.getElementById(`arrow-${uid}`);
+    if (d.style.display === 'none') {
+        d.style.display = 'block';
+        a.style.transform = 'rotate(180deg)';
+    } else {
+        d.style.display = 'none';
+        a.style.transform = 'rotate(0deg)';
     }
-}
+};
+
+window.reviewActivity = async (actId) => {
+    try {
+        const res = await apiRequest(`/v1/activities/${actId}`);
+        const act = res.data;
+        const sub = act.last_submission;
+
+        if (!sub || !sub.content) return alert("No hay respuestas guardadas.");
+
+        let answers = {};
+        try { answers = JSON.parse(sub.content); } catch (e) { }
+
+        let modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:2000; display:flex; justify-content:center; align-items:center;';
+
+        modal.innerHTML = `
+            <div class="glass-card" style="width:90%; max-width:700px; max-height:85vh; overflow-y:auto; position:relative;">
+                <button onclick="this.closest('.modal-overlay').remove()" style="position:absolute; top:1rem; right:1rem; background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;">&times;</button>
+                <h2>Resultados: ${act.title}</h2>
+                <p style="color:#cbd5e1; margin-bottom:1rem;">Calificación: ${sub.grade}/100</p>
+                
+                <div style="display:flex; flex-direction:column; gap:2rem;">
+                    ${act.questions.map((q, i) => {
+            const userAns = answers[q.id];
+
+            return `
+                        <div style="background:rgba(255,255,255,0.02); padding:1rem; border-radius:12px;">
+                            <p style="font-weight:bold; margin-bottom:0.8rem;">${i + 1}. ${q.text}</p>
+                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.5rem;">
+                                ${q.options.map(opt => {
+                // Styling Logic
+                let bg = 'rgba(255,255,255,0.05)';
+                let border = '1px solid rgba(255,255,255,0.1)';
+                let mark = '';
+
+                // If correct answer
+                if (opt.is_correct === 1) {
+                    bg = 'rgba(16,185,129,0.2)';
+                    border = '1px solid #10b981';
+                    mark = ' <span style="color:#34d399; font-weight:bold;">(Correcta)</span>';
+                }
+
+                // If user selected this
+                if (userAns == opt.id) {
+                    if (opt.is_correct === 1) {
+                        // Correct match
+                        bg = 'rgba(16,185,129,0.3)';
+                    } else {
+                        // Incorrect choice
+                        bg = 'rgba(239,68,68,0.2)';
+                        border = '1px solid #ef4444';
+                        mark = ' <span style="color:#f87171; font-weight:bold;">(Tu elección)</span>';
+                    }
+                }
+
+                return `
+                                    <div style="background:${bg}; border:${border}; padding:0.8rem; border-radius:8px; font-size:0.95rem;">
+                                        ${opt.text} ${mark}
+                                    </div>
+                                    `;
+            }).join('')}
+                            </div>
+                        </div>
+                        `;
+        }).join('')}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+    } catch (e) { alert(e.message); }
+};
+
 
 // Global Exports
 window.handleLogin = handleLogin;
@@ -1219,7 +1484,7 @@ window.createUser = createUser;
 window.enterCourse = enterCourse;
 window.filterCourses = filterCourses;
 window.showCreateCourseModal = showCreateCourseModal;
-window.saveCourse = saveCourse;
+
 window.deleteUser = deleteUser;
 window.resetUserPassword = resetUserPassword;
 window.updateUser = updateUser;
@@ -1611,28 +1876,88 @@ window.createUnit = async (courseId, btn) => {
 };
 
 window.scaffoldUnits = async (courseId, silent = false) => {
-    if (!silent && !confirm('¿Generar automáticamente las Unidades 0 a 6?')) return;
+    if (!silent && !confirm('¿Completar la estructura de unidades (0-6 + Examen)?')) return;
     try {
-        const units = [
-            'Unité 0: Introduction',
+        const fullUnits = [
             'Unité 1: Salutations',
             'Unité 2: La Famille',
             'Unité 3: Les Loisirs',
             'Unité 4: La Ville',
             'Unité 5: Au Restaurant',
-            'Unité 6: Le Futur'
+            'Unité 6: Le Futur',
+            'Examen A1'
         ];
 
-        let order = 0;
-        for (const title of units) {
-            await apiRequest('/v1/units', 'POST', { course_id: courseId, title, order_index: order++ });
+        // 1. Get existing units to avoid duplicates
+        const res = await apiRequest(`/v1/courses/${courseId}`);
+        const existingUnits = res.data.units || [];
+        const existingTitles = existingUnits.map(u => u.title);
+
+        let order = existingUnits.length > 0 ? (Math.max(...existingUnits.map(u => u.order_index)) + 1) : 0;
+        let createdCount = 0;
+
+        for (const title of fullUnits) {
+            // Check if unit number already exists (e.g. "Unité 1" matches "Unité 1: Salutations")
+            const baseTitle = title.includes(':') ? title.split(':')[0] : title;
+            const alreadyExists = existingTitles.some(t => t.startsWith(baseTitle));
+
+            if (!alreadyExists) {
+                await apiRequest('/v1/units', 'POST', { course_id: courseId, title, order_index: order++ });
+                createdCount++;
+            }
         }
-        if (!silent) alert('Unidades generadas.');
-        enterCourse(courseId);
+
+        if (!silent) {
+            if (createdCount > 0) alert(`Se han añadido ${createdCount} nuevas unidades.`);
+            else alert('La estructura ya está completa.');
+            enterCourse(courseId);
+        } else if (createdCount > 0) {
+            enterCourse(courseId);
+        }
     } catch (e) { if (!silent) alert(e.message); }
 };
 
 let tempQuizQuestions = [];
+
+window.toggleUnitMenu = (id) => {
+    const menu = document.getElementById(`unit-menu-${id}`);
+    if (menu) menu.classList.toggle('hidden');
+    // Close others
+    document.querySelectorAll('[id^="unit-menu-"]').forEach(el => {
+        if (el.id !== `unit-menu-${id}`) el.classList.add('hidden');
+    });
+};
+
+window.editUnit = async (id, currentTitle) => {
+    const newTitle = prompt('Nuevo nombre de la unidad:', currentTitle);
+    if (!newTitle || newTitle === currentTitle) return;
+    try {
+        await apiRequest(`/v1/units/${id}`, 'PUT', { title: newTitle });
+        // Reload current view
+        const activeCourse = document.querySelector('.course-card button')?.getAttribute('onclick')?.match(/\d+/)?.[0];
+        // Or cleaner: store currentCourseId globally or just grab it from DOM if simple
+        // Since we are inside the course view, we can just reload it if we have ID.
+        // Actually, we are inside enterCourse(courseId), but this function is global.
+        // We passed courseId to deleteUnit, but not editUnit.
+        // Let's rely on reload or just simple alert.Ideally we reload.
+        // Quick hack: click 'Actividades' or re-call enterCourse if possible.
+        alert('Unidad actualizada.');
+        // Try to find the course ID from the "Nueva Unidad" button which has it
+        const backBtn = document.querySelector('button[onclick^="showCreateUnitModal"]');
+        if (backBtn) {
+            const cId = backBtn.getAttribute('onclick').match(/\d+/)[0];
+            enterCourse(cId);
+        }
+    } catch (e) { alert(e.message); }
+};
+
+window.deleteUnit = async (id, courseId) => {
+    if (!confirm('¿Estás seguro de borrar esta unidad? Se borrarán todas sus actividades y notas.')) return;
+    try {
+        await apiRequest(`/v1/units/${id}`, 'DELETE');
+        enterCourse(courseId);
+    } catch (e) { alert(e.message); }
+};
 
 window.showCreateActivityModal = (unitId) => {
     tempQuizQuestions = [];
@@ -1752,8 +2077,8 @@ window.removeTempQuestion = (idx) => {
 window.createActivity = async (unitId) => {
     const title = document.getElementById('act-title').value;
 
-    if (!title) return alert('Título requerido para el cuestionario');
-    if (tempQuizQuestions.length === 0) return alert('Añade al menos una pregunta');
+    if (!title) return showToast('Título requerido', 'error');
+    if (tempQuizQuestions.length === 0) return showToast('Añade al menos una pregunta', 'error');
 
     const data = {
         unit_id: unitId,
@@ -1768,111 +2093,323 @@ window.createActivity = async (unitId) => {
     try {
         await apiRequest('/v1/activities', 'POST', data);
         document.getElementById('modal-create-activity').remove();
-        alert('Cuestionario creado exitosamente');
-        location.reload();
-    } catch (e) { alert(e.message); }
+        showToast('Cuestionario creado', 'success');
+        reloadContext();
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.deleteActivity = async (id) => {
+    if (!await showConfirm('¿Estás seguro de eliminar esta actividad? Se borrarán todos los progresos asociados.')) return;
+    try {
+        await apiRequest(`/v1/activities/${id}`, 'DELETE');
+        showToast('Actividad eliminada', 'success');
+        reloadContext();
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+// State variables for quiz wizard
+let currentQuizState = {
+    activityId: null,
+    questions: [],
+    answers: {},
+    currentQuestionIndex: 0
 };
 
 window.openActivity = async (actId) => {
     try {
         const res = await apiRequest(`/v1/activities/${actId}`);
         const act = res.data;
+        const sub = act.last_submission;
+
+        // Check for completed submission (Retake Logic)
+        if (sub && sub.status === 'COMPLETED' && currentUser.role === 'ESTUDIANTE') {
+            if (!await showConfirm(`Ya completaste esta actividad con una nota de ${(sub.grade || 0).toFixed(2)}%.\n\n¿Quieres volver a intentarlo?\nNOTA: Tu progreso anterior será reemplazado.`)) {
+                return;
+            }
+        }
 
         let modal = document.createElement('div');
         modal.className = 'modal-overlay';
+        modal.id = 'activity-modal';
         modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:2000; display:flex; justify-content:center; align-items:center;';
 
-        let contentHtml = '';
-
+        // Prepare content
         if (act.type === 'QUIZ') {
-            contentHtml = `
-                <div id="quiz-form">
-                    ${act.questions.map((q, i) => `
-                        <div style="margin-bottom:1.5rem;">
-                            <p style="font-weight:bold; margin-bottom:0.5rem;">${i + 1}. ${q.text}</p>
-                            <div style="display:grid; grid-template-columns: 1fr 1fr; gap:0.5rem;">
-                                ${q.options.map(opt => `
-                                    <label style="background:rgba(255,255,255,0.05); padding:0.8rem; border-radius:8px; cursor:pointer; border:1px solid rgba(255,255,255,0.1); display:block;">
-                                        <input type="radio" name="q-${q.id}" value="${opt.id}"> ${opt.text}
-                                    </label>
-                                `).join('')}
+            // Initialize State
+            currentQuizState = {
+                activityId: act.id,
+                questions: act.questions,
+                answers: {},
+                currentQuestionIndex: 0
+            };
+
+            // Load saved answers if IN_PROGRESS
+            if (sub && sub.content) {
+                try {
+                    currentQuizState.answers = JSON.parse(sub.content);
+                    // Find first unanswered question or last
+                    const questionIds = act.questions.map(q => q.id.toString());
+                    for (let i = 0; i < questionIds.length; i++) {
+                        if (!currentQuizState.answers[questionIds[i]]) {
+                            currentQuizState.currentQuestionIndex = i;
+                            break;
+                        }
+                    }
+                } catch (e) { console.error("Error loading saved answers", e); }
+            }
+
+            modal.innerHTML = `
+                <div class="glass-card" style="width:90%; max-width:700px; height:80vh; display:flex; flex-direction:column; position:relative;">
+                    <button onclick="pauseAndExit()" style="position:absolute; top:1rem; right:1rem; background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;">&times;</button>
+                    
+                    <div style="margin-bottom:1rem; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:1rem;">
+                        <div style="font-size:0.8rem; color:var(--primary); text-transform:uppercase;">${act.type}</div>
+                        <h2 style="margin:0.5rem 0;">${act.title}</h2>
+                        <div style="display:flex; justify-content:space-between; align-items:center;">
+                            <span style="color:gray; font-size:0.9rem;">Pregunta <span id="q-indicator">1</span> de ${act.questions.length}</span>
+                            <div>
+                                ${currentUser.role !== 'ESTUDIANTE' ?
+                    `<button class="btn btn-secondary" style="font-size:0.8rem; padding:0.4rem 0.8rem; margin-right:0.5rem;" onclick="document.getElementById('activity-modal').remove(); editActivity(${act.id})">✏️ Editar</button>`
+                    : ''}
+                                <button class="btn btn-secondary" onclick="pauseAndExit()" style="font-size:0.8rem; padding:0.4rem 0.8rem;">
+                                    ${currentUser.role === 'ESTUDIANTE' ? '⏸ Pausar y Guardar' : '✖ Salir (Sin guardar)'}
+                                </button>
                             </div>
                         </div>
-                    `).join('')}
+                    </div>
+                    <div id="quiz-wizard-body" style="flex:1; overflow-y:auto; display:flex; flex-direction:column; justify-content:center; padding:1rem;">
+                        <!-- Question Rendered Here -->
+                    </div>
+
+                    <div style="margin-top:auto; padding-top:1rem; border-top:1px solid rgba(255,255,255,0.1); display:flex; justify-content:space-between;">
+                        <button id="btn-prev" class="btn btn-secondary" onclick="changeQuestion(-1)" disabled>Anterior</button>
+                        <button id="btn-next" class="btn btn-primary" onclick="changeQuestion(1)">Siguiente</button>
+                        <button id="btn-finish" class="btn btn-success hidden" onclick="finishQuiz()">Finalizar</button>
+                    </div>
                 </div>
             `;
+            document.body.appendChild(modal);
+            renderQuizStep();
+
         } else {
-            contentHtml = `
-                <label>Tu Respuesta / Enlace</label>
-                <textarea id="submission-content" rows="4" style="width:100%; padding:1rem; border-radius:8px; margin-bottom:1rem; background:rgba(0,0,0,0.3); color:white;" placeholder="Escribe tu respuesta aquí..."></textarea>
-            `;
-        }
-
-        modal.innerHTML = `
-            <div class="glass-card" style="width:90%; max-width:700px; max-height:90vh; overflow-y:auto; position:relative;">
-                <button onclick="this.closest('.modal-overlay').remove()" style="position:absolute; top:1rem; right:1rem; background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;">&times;</button>
-                <div style="margin-bottom:2rem; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:1rem;">
-                    <div style="font-size:0.8rem; color:var(--primary); text-transform:uppercase; letter-spacing:1px;">${act.type}</div>
-                    <h2 style="margin:0.5rem 0;">${act.title}</h2>
-                    <p style="color:#cbd5e1; white-space:pre-wrap;">${act.description}</p>
-                    <div style="font-size:0.8rem; color:gray; margin-top:0.5rem;">Puntaje Máximo: ${act.max_score}</div>
+            // Normal view for other activity types
+            modal.innerHTML = `
+                <div class="glass-card" style="width:90%; max-width:700px; max-height:90vh; overflow-y:auto; position:relative;">
+                    <button onclick="this.closest('.modal-overlay').remove()" style="position:absolute; top:1rem; right:1rem; background:none; border:none; color:white; font-size:1.5rem; cursor:pointer;">&times;</button>
+                    <h2 style="margin-bottom:1rem;">${act.title}</h2>
+                    <p style="white-space:pre-wrap; margin-bottom:2rem;">${act.description}</p>
+                    
+                    <label>Tu Respuesta / Enlace</label>
+                    <textarea id="submission-content" rows="5" style="width:100%; padding:1rem; border-radius:8px; margin-bottom:1rem; background:rgba(0,0,0,0.3); color:white;" placeholder="Escribe tu respuesta...">${sub ? sub.content : ''}</textarea>
+                    
+                    ${currentUser.role === 'ESTUDIANTE' ? `
+                        <button class="btn btn-primary" style="width:100%;" onclick="submitRegularActivity(${act.id})">Entregar Actividad</button>
+                    ` : ''}
                 </div>
-
-                ${contentHtml}
-
-                ${currentUser.role === 'ESTUDIANTE' ? `
-                    <button class="btn btn-primary" style="width:100%; margin-top:2rem;" onclick="submitActivityForm(${act.id}, '${act.type}')">Entregar Actividad</button>
-                ` : '<p style="text-align:center; color:gray; margin-top:2rem;">(Vista Previa - No puedes entregar)</p>'}
-            </div>
-        `;
-        document.body.appendChild(modal);
+            `;
+            document.body.appendChild(modal);
+        }
 
     } catch (e) { alert(e.message); }
 };
 
-window.submitActivityForm = async (actId, type) => {
-    let content = '';
+window.renderQuizStep = () => {
+    const qIndex = currentQuizState.currentQuestionIndex;
+    const question = currentQuizState.questions[qIndex];
+    const container = document.getElementById('quiz-wizard-body');
+    const qIds = currentQuizState.questions.map(q => q.id);
 
-    if (type === 'QUIZ') {
-        // Collect answers
-        let answers = {};
-        const questions = document.querySelectorAll('[name^="q-"]');
-        let totalQuestions = new Set();
+    // Update Indicators
+    document.getElementById('q-indicator').innerText = qIndex + 1;
 
-        // Find all unique question IDs in the DOM
-        document.querySelectorAll('#quiz-form [name^="q-"]').forEach(el => {
-            totalQuestions.add(el.name);
-        });
-
-        // Collect checked
-        document.querySelectorAll('#quiz-form input:checked').forEach(el => {
-            const qId = el.name.split('-')[1];
-            answers[qId] = el.value;
-        });
-
-        if (Object.keys(answers).length < totalQuestions.size) {
-            if (!confirm('No has respondido todas las preguntas. ¿Enviar igual?')) return;
-        }
-        content = JSON.stringify(answers);
+    // Buttons state
+    document.getElementById('btn-prev').disabled = qIndex === 0;
+    if (qIndex === currentQuizState.questions.length - 1) {
+        document.getElementById('btn-next').classList.add('hidden');
+        document.getElementById('btn-finish').classList.remove('hidden');
     } else {
-        content = document.getElementById('submission-content').value;
-        if (!content) return alert('Escribe una respuesta');
+        document.getElementById('btn-next').classList.remove('hidden');
+        document.getElementById('btn-finish').classList.add('hidden');
+    }
+
+    // Render Question
+    const savedVal = currentQuizState.answers[question.id] || '';
+
+    container.innerHTML = `
+        <div style="font-size:1.2rem; margin-bottom:1.5rem; font-weight:bold; color:white;">
+            ${question.text}
+        </div>
+        <div style="display:flex; flex-direction:column; gap:0.8rem;">
+            ${question.options.map(opt => `
+                <label class="option-card ${savedVal == opt.id ? 'selected' : ''}" 
+                    style="
+                        background:${savedVal == opt.id ? 'rgba(99,102,241,0.2)' : 'rgba(255,255,255,0.05)'}; 
+                        border:1px solid ${savedVal == opt.id ? 'var(--primary)' : 'rgba(255,255,255,0.1)'};
+                        padding:1rem; border-radius:12px; cursor:pointer; display:flex; align-items:center; gap:1rem; transition:all 0.2s;
+                    "
+                    onclick="selectOption(${question.id}, ${opt.id}, this)"
+                >
+                    <div style="
+                        width:20px; height:20px; border-radius:50%; 
+                        border:2px solid ${savedVal == opt.id ? 'var(--primary)' : 'gray'};
+                        background:${savedVal == opt.id ? 'var(--primary)' : 'transparent'};
+                    "></div>
+                    <span style="font-size:1.05rem;">${opt.text}</span>
+                </label>
+            `).join('')}
+        </div>
+    `;
+};
+
+window.selectOption = (qId, optId, element) => {
+    // UI Update
+    document.querySelectorAll('.option-card').forEach(el => {
+        el.style.background = 'rgba(255,255,255,0.05)';
+        el.style.borderColor = 'rgba(255,255,255,0.1)';
+        el.querySelector('div').style.background = 'transparent';
+        el.querySelector('div').style.borderColor = 'gray';
+    });
+
+    element.style.background = 'rgba(99,102,241,0.2)';
+    element.style.borderColor = 'var(--primary)';
+    element.querySelector('div').style.background = 'var(--primary)';
+    element.querySelector('div').style.borderColor = 'var(--primary)';
+
+    // Save state
+    currentQuizState.answers[qId] = optId;
+};
+
+window.changeQuestion = (delta) => {
+    currentQuizState.currentQuestionIndex += delta;
+    renderQuizStep();
+};
+
+window.pauseAndExit = async () => {
+    if (currentUser.role !== 'ESTUDIANTE') {
+        document.getElementById('activity-modal').remove();
+        return;
+    }
+    try {
+        await apiRequest('/v1/submit', 'POST', {
+            activity_id: currentQuizState.activityId,
+            content: JSON.stringify(currentQuizState.answers),
+            status: 'IN_PROGRESS'
+        });
+        document.getElementById('activity-modal').remove();
+    } catch (e) { showToast('Error guardando progreso: ' + e.message, 'error'); }
+};
+
+window.finishQuiz = async () => {
+    // Validate all answered?
+    const answeredCount = Object.keys(currentQuizState.answers).length;
+    const total = currentQuizState.questions.length;
+
+    if (answeredCount < total) {
+        if (!await showConfirm(`Has respondido ${answeredCount} de ${total} preguntas. ¿Seguro que quieres finalizar?`)) return;
+    }
+
+    if (currentUser.role !== 'ESTUDIANTE') {
+        // Admin Simulation
+        let score = 0;
+        currentQuizState.questions.forEach(q => {
+            const ans = currentQuizState.answers[q.id];
+            const correct = q.options.find(o => o.isCorrect);
+            if (ans == correct.id) score++;
+        });
+        const pct = (score / total) * 100;
+        await showConfirm(`[MODO PRUEBA ADMIN]\nTu calificación simulada sería: ${pct.toFixed(2)}%\n\nNo se ha guardado nada en la base de datos.`);
+        document.getElementById('activity-modal').remove();
+        return;
     }
 
     try {
-        const res = await apiRequest('/v1/submit', 'POST', { activity_id: actId, content });
+        const res = await apiRequest('/v1/submit', 'POST', {
+            activity_id: currentQuizState.activityId,
+            content: JSON.stringify(currentQuizState.answers),
+            status: 'COMPLETED'
+        });
 
-        // Show grade if quiz
-        if (res.grade !== undefined && res.grade !== null) {
-            alert(`¡Actividad enviada!\nTu calificación: ${res.grade.toFixed(2)} / 100`);
-            // Close modal
-            document.querySelector('.modal-overlay').remove();
+        if (res.grade !== undefined) {
+            alert(`¡Cuestionario finalizado!\nTu calificación: ${res.grade.toFixed(2)}%`);
         } else {
-            alert(res.message);
-            document.querySelector('.modal-overlay').remove();
+            alert('Cuestionario entregado.');
+        }
+        document.getElementById('activity-modal').remove();
+
+        // Reload unit details if open, or course view check?
+        // Soft refresh
+        setTimeout(() => reloadContext(), 500);
+
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.submitRegularActivity = async (actId) => {
+    const content = document.getElementById('submission-content').value;
+    if (!content) return alert('Escribe algo.');
+    try {
+        await apiRequest('/v1/submit', 'POST', { activity_id: actId, content, status: 'COMPLETED' });
+        alert('Actividad entregada');
+        document.querySelector('.modal-overlay').remove();
+    } catch (e) { alert(e.message); }
+};
+
+window.renderUnits = (units) => {
+    if (!units || units.length === 0) return '<div class="glass-card"><p>No hay unidades en este curso.</p></div>';
+
+    return `
+        <div class="card-grid">
+            ${units.map(u => {
+        // Progress Logic
+        const pct = u.progress_percentage !== undefined ? Math.round(u.progress_percentage) : 0;
+        let progressBarColor = "#3b82f6"; // default blue
+        if (pct >= 100) progressBarColor = "#22c55e"; // green
+        if (pct > 0 && pct < 100) progressBarColor = "#eab308"; // yellow/orange
+
+        // Check active submission (for button style)
+        let hasActive = false;
+        if (u.activities) {
+            hasActive = u.activities.some(a => a.user_submission && a.user_submission.status === 'IN_PROGRESS');
         }
 
-    } catch (e) { alert(e.message); }
+        return `
+                <div class="glass-card" style="position:relative; display:flex; flex-direction:column; justify-content:space-between; min-height:220px;">
+                    <!-- Edit/Delete for Admin -->
+                    ${currentUser.role === 'ADMIN' || currentUser.role === 'PROFESOR' ?
+                `<div style="position:absolute; top:1rem; right:1rem;">
+                        <button onclick="editUnit(${u.id})" style="background:rgba(0,0,0,0.5); border:none; color:white; border-radius:50%; width:30px; height:30px; cursor:pointer; margin-right:5px;">✏️</button>
+                        <button onclick="deleteUnit(${u.id})" style="background:rgba(0,0,0,0.5); border:none; color:#ef4444; border-radius:50%; width:30px; height:30px; cursor:pointer;">🗑️</button>
+                    </div>` : ''}
+
+                    <div style="margin-bottom:1rem;">
+                        <h3 style="font-size:1.4rem; margin-bottom:0.5rem; color:white;">${u.title}</h3>
+                        <p style="color:#cbd5e1; font-size:0.9rem; line-height:1.4;">${u.description || 'Sin descripción'}</p>
+                    </div>
+                    
+                    <div style="margin-top:auto;">
+                         <!-- Progress Bar -->
+                        <div style="display:flex; justify-content:space-between; margin-bottom:0.4rem; font-size:0.8rem; color:#94a3b8; font-weight:bold;">
+                            <span>Progreso</span>
+                            <span>${pct}/100%</span>
+                        </div>
+                        <div style="background:rgba(255,255,255,0.1); height:8px; border-radius:4px; overflow:hidden; margin-bottom:1.5rem;">
+                            <div style="background:${progressBarColor}; width:${pct}%; height:100%; transition:width 0.5s ease-out;"></div>
+                        </div>
+
+                        <button class="btn btn-primary" style="width:100%; padding:0.8rem; font-weight:bold; box-shadow:0 4px 6px rgba(0,0,0,0.2); ${hasActive ? 'background:#eab308; border-color:#eab308; color:black;' : ''}" 
+                            onclick="openUnitDetails(${JSON.stringify(u).replace(/"/g, '&quot;')})"
+                        >
+                            ${hasActive ? 'Continuar Lección ⏯' : (pct >= 100 ? 'Repasar Unidad' : 'Comenzar Unidad')}
+                        </button>
+                    </div>
+                </div>
+                `;
+    }).join('')}
+             ${currentUser.role === 'ADMIN' || currentUser.role === 'PROFESOR' ?
+            `<div class="glass-card-hover" style="display:flex; align-items:center; justify-content:center; border:2px dashed rgba(255,255,255,0.1); cursor:pointer; min-height:220px; background:rgba(255,255,255,0.02); border-radius:16px;" onclick="showCreateUnitModal()">
+                    <span style="font-size:1.5rem; color:var(--primary); font-weight:bold;">+ Nueva Unidad</span>
+                </div>` : ''}
+        </div>
+    `;
 };
 
 window.openUnitDetails = (unit) => {
@@ -1882,17 +2419,35 @@ window.openUnitDetails = (unit) => {
 
     // Check role
     const isStudent = currentUser.role === 'ESTUDIANTE';
-
     let content = '';
 
     if (isStudent) {
-        // Init view for student
+        // Find single quiz logic
+        const singleQuiz = unit.activities && unit.activities.length === 1 && unit.activities[0].type === 'QUIZ' ? unit.activities[0] : null;
+        let btnText = "Comenzar Unidad";
+        let btnAction = `showUnitActivities(this, ${JSON.stringify(unit).replace(/"/g, "&quot;")})`;
+
+        if (singleQuiz) {
+            const sub = singleQuiz.user_submission;
+            if (sub && sub.status === 'IN_PROGRESS') {
+                btnText = "Continuar Cuestionario ⏯";
+            } else if (sub && sub.status === 'COMPLETED') {
+                btnText = `Reintentar Cuestionario (Nota: ${sub.grade || 0}%)`;
+            } else {
+                btnText = "Comenzar Cuestionario";
+            }
+            btnAction = `this.closest('.modal-overlay').remove(); openActivity(${singleQuiz.id})`;
+        }
+
         content = `
             <div style="text-align:center;">
                 <h2 style="font-size:2.5rem; margin-bottom:1rem; color:var(--primary);">${unit.title}</h2>
                 <div style="font-size:6rem; margin-bottom:2rem; animation: float 3s ease-in-out infinite;">📖</div>
                 <p style="font-size:1.2rem; color:#cbd5e1; margin-bottom:2rem;">Vas a empezar la <strong>${unit.title}</strong>.<br>Aquí encontrarás los recursos y cuestionarios.</p>
-                <button class="btn btn-primary" style="font-size:1.2rem; padding:1rem 2rem; box-shadow:0 0 20px rgba(99,102,241,0.5);" onclick="showUnitActivities(this, ${JSON.stringify(unit).replace(/"/g, "&quot;")})">Comenzar Unidad</button>
+                <button class="btn btn-primary" style="font-size:1.2rem; padding:1rem 2rem; box-shadow:0 0 20px rgba(99,102,241,0.5);" onclick="${btnAction}">${btnText}</button>
+                
+                ${singleQuiz && singleQuiz.user_submission && singleQuiz.user_submission.status === 'IN_PROGRESS' ?
+                `<p style="margin-top:1rem; color:#facc15;">Tienes un intento guardado.</p>` : ''}
             </div>
             <style>
                 @keyframes float { 0% { transform: translateY(0px); } 50% { transform: translateY(-20px); } 100% { transform: translateY(0px); } }
@@ -1965,9 +2520,14 @@ window.showUnitActivities = (btn, unit) => {
                         <div style="color:#94a3b8; font-size:0.95rem;">${a.description || 'Sin descripción'}</div>
                     </div>
 
-                    ${isAdmin ? '<div style="font-size:0.7rem; text-transform:uppercase; letter-spacing:1px; background:rgba(255,255,255,0.1); padding:4px 8px; border-radius:4px; color:#cbd5e1;">Admin</div>' : ''}
+                    ${isAdmin ? `
+                        <div style="display:flex; gap:0.5rem; margin-right:1rem;" onclick="event.stopPropagation()">
+                             <button style="background:rgba(255,255,255,0.1); border:none; color:white; border-radius:50%; width:32px; height:32px; cursor:pointer;" title="Editar Actividad" onclick="editActivity(${a.id})">✏️</button>
+                             <button style="background:rgba(255,255,255,0.1); border:none; color:white; border-radius:50%; width:32px; height:32px; cursor:pointer;" title="Eliminar Actividad" onclick="deleteActivity(${a.id})">🗑️</button>
+                        </div>
+                    ` : ''}
                     
-                    <div style="font-size:1.5rem; color:rgba(255,255,255,0.2); margin-left:1rem;">›</div>
+                    <div style="font-size:1.5rem; color:rgba(255,255,255,0.2); margin-left:0.5rem;">›</div>
                 </div>
             `).join('') : `
                 <div style="text-align:center; padding:4rem; border:2px dashed rgba(255,255,255,0.05); border-radius:20px; color:#64748b;">
@@ -1979,4 +2539,730 @@ window.showUnitActivities = (btn, unit) => {
     `;
 
     container.innerHTML = html;
+};
+
+// ==========================================
+// ADMIN EDITING FUNCTIONS
+// ==========================================
+
+window.deleteUnit = async (id) => {
+    if (!await showConfirm('¿Eliminar unidad y todo su contenido?')) return;
+    try {
+        await apiRequest(`/v1/units/${id}`, 'DELETE');
+        showToast('Unidad eliminada', 'success');
+        reloadContext();
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.editUnit = async (id) => {
+    try {
+        const unit = window.currentUnits ? window.currentUnits.find(u => u.id === id) : null;
+        const currentTitle = unit ? unit.title : '';
+        const currentDesc = unit ? (unit.description || '') : '';
+
+        let modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:3000; display:flex; justify-content:center; align-items:center;';
+        modal.innerHTML = `
+            <div class="glass-card" style="width:400px;">
+                <h3>Editar Unidad</h3>
+                <label>Título</label>
+                <input id="edit-unit-title" style="width:100%; margin-bottom:1rem;" placeholder="Título..." value="${currentTitle.replace(/"/g, '&quot;')}">
+                <label>Descripción</label>
+                <input id="edit-unit-desc" style="width:100%; margin-bottom:1rem;" placeholder="Descripción..." value="${currentDesc.replace(/"/g, '&quot;')}">
+                <div style="display:flex; justify-content:flex-end; gap:1rem;">
+                    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+                    <button class="btn btn-primary" onclick="saveUnitChanges(${id})">Guardar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.saveUnitChanges = async (id) => {
+    const title = document.getElementById('edit-unit-title').value;
+    const desc = document.getElementById('edit-unit-desc').value;
+
+    if (!title) return showToast('Título requerido', 'error');
+
+    try {
+        await apiRequest(`/v1/units/${id}`, 'PUT', { title, description: desc });
+        showToast('Unidad actualizada', 'success');
+
+        const modal = document.getElementById('edit-unit-title').closest('.modal-overlay');
+        if (modal) modal.remove();
+
+        reloadContext();
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+// Activity Editor State
+let editingActivity = null;
+
+window.editActivity = async (id) => {
+    try {
+        const res = await apiRequest(`/v1/activities/${id}`);
+        editingActivity = res.data;
+
+        let modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.id = 'editor-modal';
+        modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.95); z-index:2500; display:flex; justify-content:center; align-items:center;';
+
+        modal.innerHTML = `
+            <div class="glass-card" style="width:95%; max-width:900px; height:90vh; display:flex; flex-direction:column; background:#0f172a; border:1px solid rgba(255,255,255,0.1);">
+                <div style="display:flex; justify-content:space-between; align-items:center; border-bottom:1px solid rgba(255,255,255,0.1); padding-bottom:1rem; margin-bottom:1rem;">
+                    <h2 style="margin:0;">Editar Actividad</h2>
+                    <div style="display:flex; gap:1rem;">
+                        <button class="btn btn-secondary" onclick="document.getElementById('editor-modal').remove()">Cancelar</button>
+                        <button class="btn btn-primary" onclick="saveActivityChanges()">💾 Guardar Cambios</button>
+                    </div>
+                </div>
+
+                <div style="flex:1; overflow-y:auto; padding-right:1rem;">
+                    <div style="display:grid; grid-template-columns: 1fr 1fr; gap:1rem; margin-bottom:1.5rem;">
+                        <div class="input-group">
+                            <label>Título</label>
+                            <input id="edit-act-title" value="${editingActivity.title.replace(/"/g, '&quot;')}">
+                        </div>
+                        <div class="input-group">
+                            <label>Descripción</label>
+                            <input id="edit-act-desc" value="${(editingActivity.description || '').replace(/"/g, '&quot;')}">
+                        </div>
+                    </div>
+
+                    ${editingActivity.type === 'QUIZ' ? `
+                    <div style="background:rgba(255,255,255,0.03); padding:1rem; border-radius:8px;">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:1rem;">
+                            <h3>Preguntas (${editingActivity.questions.length})</h3>
+                            <button class="btn btn-secondary" onclick="addQuestionToEditor()">+ Agregar Pregunta</button>
+                        </div>
+                        <div id="editor-questions-list" style="display:flex; flex-direction:column; gap:1rem;">
+                            <!-- Render Questions -->
+                        </div>
+                    </div>
+                    ` : ''}
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        if (editingActivity.type === 'QUIZ') renderEditorQuestions();
+
+    } catch (e) { alert(e.message); }
+};
+
+window.renderEditorQuestions = () => {
+    const list = document.getElementById('editor-questions-list');
+    if (!list) return;
+
+    list.innerHTML = editingActivity.questions.map((q, i) => `
+        <div style="background:rgba(0,0,0,0.3); padding:1rem; border-radius:8px; border:1px solid rgba(255,255,255,0.1);">
+            <div style="display:flex; justify-content:space-between; margin-bottom:0.5rem;">
+                <span style="font-weight:bold; color:var(--primary);">Pregunta ${i + 1}</span>
+                <div style="display:flex; gap:0.5rem;">
+                    <button style="border:none; background:none; cursor:pointer;" onclick="editEditorQuestion(${i})">✏️</button>
+                    <button style="border:none; background:none; cursor:pointer; color:#ef4444;" onclick="removeEditorQuestion(${i})">🗑️</button>
+                </div>
+            </div>
+            <div style="margin-bottom:0.5rem; font-size:1.1rem;">${q.text}</div>
+            <div style="font-size:0.9rem; color:#94a3b8;">
+                ${q.options.map(o => `
+                    <span style="display:inline-block; margin-right:1rem; color:${o.isCorrect ? '#4ade80' : 'inherit'}">
+                         ${o.isCorrect ? '✅' : '○'} ${o.text}
+                    </span>
+                `).join('')}
+            </div>
+        </div>
+    `).join('');
+};
+
+window.removeEditorQuestion = async (idx) => {
+    if (!await showConfirm('Borrar pregunta?')) return;
+    editingActivity.questions.splice(idx, 1);
+    renderEditorQuestions();
+};
+
+window.addQuestionToEditor = () => {
+    const newQ = { text: 'Nueva Pregunta', options: [{ text: 'Opción 1', isCorrect: true }, { text: 'Opción 2', isCorrect: false }], id: Date.now() };
+    editingActivity.questions.push(newQ);
+    renderEditorQuestions();
+    editEditorQuestion(editingActivity.questions.length - 1);
+};
+
+window.editEditorQuestion = (idx) => {
+    const q = editingActivity.questions[idx];
+
+    const modal = document.createElement('div');
+    modal.className = 'modal-overlay';
+    modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:3000; display:flex; justify-content:center; align-items:center;';
+    modal.innerHTML = `
+        <div class="glass-card" style="width:500px; background:#1e293b;">
+            <h3>Editar Pregunta</h3>
+            <label>Texto</label>
+            <textarea id="edit-q-text" style="width:100%; margin-bottom:1rem; color:black;">${q.text}</textarea>
+            
+            <label>Opciones (Marca la correcta)</label>
+            <div id="edit-q-opts">
+                ${q.options.map((o, optIdx) => `
+                    <div style="display:flex; gap:0.5rem; margin-bottom:0.5rem;">
+                        <input type="radio" name="edit-q-correct" value="${optIdx}" ${o.isCorrect ? 'checked' : ''}>
+                        <input type="text" class="edit-q-opt-val" value="${o.text}" style="color:black; flex:1;">
+                        <button onclick="this.parentElement.remove()" style="color:red; background:none; border:none;">x</button>
+                    </div>
+                `).join('')}
+            </div>
+            <button class="btn btn-secondary" style="margin-bottom:1rem; font-size:0.8rem;" onclick="addOptionToEditorModal()">+ Opción</button>
+            
+            <div style="display:flex; gap:1rem;">
+                 <button class="btn btn-primary" onclick="window.saveEditorQuestion(${idx}, this)">Guardar</button>
+                 <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+            </div>
+        </div>
+    `;
+    document.body.appendChild(modal);
+
+    // Helper needed for the dynamic modal
+    window.addOptionToEditorModal = () => {
+        const div = document.createElement('div');
+        div.style.cssText = "display:flex; gap:0.5rem; margin-bottom:0.5rem;";
+        div.innerHTML = `
+            <input type="radio" name="edit-q-correct" value="999">
+            <input type="text" class="edit-q-opt-val" value="Nueva Opción" style="color:black; flex:1;">
+            <button onclick="this.parentElement.remove()" style="color:red; background:none; border:none;">x</button>
+         `;
+        document.getElementById('edit-q-opts').appendChild(div);
+        // Re-index radios logic strictly not needed if we iterate inputs.
+    };
+
+    window.saveEditorQuestion = (qIndex, btn) => {
+        const modalEl = btn.closest('.glass-card');
+        const txt = modalEl.querySelector('#edit-q-text').value;
+        const optRows = modalEl.querySelectorAll('#edit-q-opts > div');
+
+        if (!txt) return showToast('Texto requerido', 'error');
+
+        const newOpts = [];
+        let hasCorrect = false;
+
+        optRows.forEach((row, i) => {
+            const radio = row.querySelector('input[type="radio"]');
+            const inp = row.querySelector('input[type="text"]');
+
+            if (radio.checked) hasCorrect = true;
+            newOpts.push({
+                text: inp.value,
+                isCorrect: radio.checked
+            });
+        });
+
+        if (!hasCorrect && newOpts.length > 0) newOpts[0].isCorrect = true; // Fallback
+
+        editingActivity.questions[qIndex].text = txt;
+        editingActivity.questions[qIndex].options = newOpts;
+        renderEditorQuestions();
+        btn.closest('.modal-overlay').remove();
+    };
+};
+
+window.saveActivityChanges = async () => {
+    const title = document.getElementById('edit-act-title').value;
+    const desc = document.getElementById('edit-act-desc').value;
+
+    // Clean data
+    const payload = {
+        title,
+        description: desc,
+        questions: editingActivity.questions
+    };
+
+    try {
+        await apiRequest(`/v1/activities/${editingActivity.id}`, 'PUT', payload);
+        showToast('Cambios guardados', 'success');
+        document.getElementById('editor-modal').remove();
+        reloadContext();
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.editCourse = async (id) => {
+    const course = window.currentCourses.find(c => c.id === id);
+    if (!course) return;
+
+    try {
+        // Fetch professors
+        const resUsers = await apiRequest('/v1/users');
+        const professors = (resUsers.data || []).filter(u => u.role === 'PROFESOR');
+
+        let modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.9); z-index:3000; display:flex; justify-content:center; align-items:center;';
+
+        const inputStyle = 'width:100%; margin-bottom:1rem; background:rgba(0,0,0,0.3); color:white; border:1px solid rgba(255,255,255,0.2); padding:0.5rem; border-radius:4px;';
+
+        modal.innerHTML = `
+            <div class="glass-card" style="width:400px;">
+                <h3>Editar Curso</h3>
+                <label>Nombre del Curso</label>
+                <input id="edit-course-name" style="${inputStyle}" value="${course.name.replace(/"/g, '&quot;')}">
+                
+                <label>Horario (Descripción)</label>
+                <input id="edit-course-schedule" style="${inputStyle}" value="${(course.schedule_description || '').replace(/"/g, '&quot;')}">
+                
+                <label>Profesor</label>
+                <select id="edit-course-teacher" style="${inputStyle}">
+                    <option value="">-- Sin asignar --</option>
+                    ${professors.map(p => `
+                        <option value="${p.id}" ${course.teacher_id === p.id ? 'selected' : ''}>${p.full_name}</option>
+                    `).join('')}
+                </select>
+
+                <div style="display:flex; justify-content:flex-end; gap:1rem;">
+                    <button class="btn btn-secondary" onclick="this.closest('.modal-overlay').remove()">Cancelar</button>
+                    <button class="btn btn-primary" onclick="saveCourseChanges(${id})">Guardar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+    } catch (e) { showToast('Error cargando datos: ' + e.message, 'error'); }
+};
+
+window.saveCourseChanges = async (id) => {
+    const name = document.getElementById('edit-course-name').value;
+    const schedule_description = document.getElementById('edit-course-schedule').value;
+    const teacher_id = document.getElementById('edit-course-teacher').value;
+
+    if (!name) return showToast('Nombre requerido', 'error');
+
+    try {
+        await apiRequest(`/v1/courses/${id}`, 'PUT', { name, schedule_description, teacher_id: teacher_id || null });
+        showToast('Curso actualizado', 'success');
+        document.getElementById('edit-course-name').closest('.modal-overlay').remove();
+        loadView('courses'); // Refresh list
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.reloadContext = async () => {
+    if (window.currentCourseId) {
+        await enterCourse(window.currentCourseId);
+    } else {
+        location.reload();
+    }
+};
+
+// ==========================================
+// HOMEWORK SYSTEM
+// ==========================================
+
+window.renderHomeworkTab = (courseId) => {
+    const area = document.getElementById('homework-area');
+    if (!area) return;
+
+    if (currentUser.role === 'ESTUDIANTE') {
+        renderStudentAssignments(area);
+    } else if (currentUser.role === 'PROFESOR') {
+        renderProfessorHomeworkView(area, courseId);
+    } else {
+        // ADMIN
+        renderAdminHomeworkView(area);
+    }
+};
+
+// --- PROFESOR VIEW ---
+window.renderProfessorHomeworkView = (area, courseId) => {
+    const assignments = window.currentAssignments || [];
+
+    area.innerHTML = `
+        <div style="display:grid; grid-template-columns: 1fr; gap:2rem;">
+            <!-- CREATE ASSIGNMENT -->
+            <div class="glass-card">
+                <h3 style="color:var(--primary); margin-bottom:1rem;">Asignar Deber</h3>
+                <input id="new-assign-title" class="input-group" placeholder="Título del deber..." style="width:100%; margin-bottom:0.5rem; background:rgba(0,0,0,0.3); color:white; border:1px solid rgba(255,255,255,0.2); padding:0.5rem; border-radius:4px;">
+                <textarea id="new-assign-desc" class="input-group" placeholder="Descripción..." style="width:100%; margin-bottom:0.5rem; min-height:80px; background:rgba(0,0,0,0.3); color:white; border:1px solid rgba(255,255,255,0.2); padding:0.5rem; border-radius:4px;"></textarea>
+                <div style="display:flex; justify-content:flex-end;">
+                    <button class="btn btn-primary" onclick="createAssignment(${courseId})">Enviar a Alumnos</button>
+                </div>
+            </div>
+
+             <!-- LIST OF CREATED ASSIGNMENTS -->
+            <div class="glass-card">
+                <h3 style="color:var(--primary); margin-bottom:1rem;">Mis Asignaciones Creadas</h3>
+                <div style="max-height:300px; overflow-y:auto;">
+                    ${assignments.length === 0 ? '<p style="color:gray;">No has creado asignaciones.</p>' : ''}
+                    ${assignments.map(a => `
+                        <div style="background:rgba(255,255,255,0.02); padding:1rem; border-radius:8px; margin-bottom:0.5rem; border:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:center;">
+                            <div>
+                                <div style="font-weight:bold;">${a.title}</div>
+                                <div style="font-size:0.8rem; color:#94a3b8;">${new Date(a.created_at).toLocaleDateString()}</div>
+                            </div>
+                            <div style="display:flex; gap:0.5rem;">
+                                <button class="btn btn-secondary" style="padding:0.3rem 0.8rem; font-size:0.8rem;" onclick="viewAssignmentDetails(${a.id})">👁️ Ver Entregas</button>
+                                <button class="btn btn-danger" style="padding:0.3rem 0.8rem; font-size:0.8rem;" onclick="deleteAssignment(${a.id}, ${courseId})">🗑️ Borrar</button>
+                            </div>
+                        </div>
+                    `).join('')}
+                </div>
+            </div>
+
+            <!-- REVIEW SUBMISSIONS (Student List - Legacy/Alternate view) -->
+            <div class="glass-card">
+                <h3 style="color:var(--primary); margin-bottom:1rem;">Revisar por Estudiante</h3>
+                <p style="color:gray; font-size:0.9rem; margin-bottom:1rem;">Selecciona un estudiante para ver todas sus entregas.</p>
+                <div id="prof-student-list"></div>
+            </div>
+        </div>
+    `;
+    renderHomeworkStudentList(document.getElementById('prof-student-list'));
+};
+
+window.createAssignment = async (courseId) => {
+    const title = document.getElementById('new-assign-title').value;
+    const description = document.getElementById('new-assign-desc').value;
+
+    if (!title) return showToast('El título es requerido', 'error');
+
+    try {
+        await apiRequest(`/v1/courses/${courseId}/assignments`, 'POST', { title, description });
+        showToast('Deber asignado correctamente', 'success');
+
+        // Refresh assignments locally
+        const res = await apiRequest(`/v1/courses/${courseId}/assignments`);
+        window.currentAssignments = res.data;
+        renderHomeworkTab(courseId); // Re-render view
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.deleteAssignment = async (assignId, courseId) => {
+    if (!await showConfirm('¿Estás seguro de borrar esta asignación y todas las entregas asociadas?')) return;
+    try {
+        await apiRequest(`/v1/assignments/${assignId}`, 'DELETE');
+        showToast('Asignación eliminada', 'success');
+        // Refresh assignments locally
+        const res = await apiRequest(`/v1/courses/${courseId}/assignments`);
+        window.currentAssignments = res.data;
+        renderHomeworkTab(courseId); // Re-render view
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.viewAssignmentDetails = async (assignId) => {
+    const area = document.getElementById('homework-area');
+    area.innerHTML = '<p>Cargando detalles...</p>';
+    try {
+        const res = await apiRequest(`/v1/assignments/${assignId}/submissions`);
+        const { data: submissions, assignment } = res; // API returns data (list) and assignment details
+
+        area.innerHTML = `
+            <button class="btn btn-secondary" style="margin-bottom:1rem;" onclick="renderHomeworkTab(window.currentCourseId)">⬅ Volver a Panel</button>
+            <div class="glass-card">
+                <h2 style="color:var(--primary); margin-bottom:0.5rem;">${assignment.title}</h2>
+                <p style="color:#cbd5e1; margin-bottom:1.5rem;">${assignment.description || ''}</p>
+                
+                <h4 style="margin-bottom:1rem;">Entregas de Estudiantes</h4>
+                <div style="display:flex; flex-direction:column; gap:0.5rem;">
+                    ${submissions.map(item => {
+            const s = item.student;
+            const sub = item.submission;
+            return `
+                        <div style="background:rgba(255,255,255,0.02); padding:1rem; border-radius:8px; border-bottom:1px solid rgba(255,255,255,0.05); display:flex; justify-content:space-between; align-items:flex-start;">
+                            <div>
+                                <div style="font-weight:bold;">${s.full_name}</div>
+                                <div style="font-size:0.8rem; color:#94a3b8;">${s.email}</div>
+                            </div>
+                            <div style="text-align:right;">
+                                ${sub ? `
+                                    <div style="color:#4ade80; font-size:0.9rem; margin-bottom:0.3rem;">✅ Entregado: ${new Date(sub.submitted_at).toLocaleDateString()}</div>
+                                    <a href="${sub.file_url}" target="_blank" style="color:var(--secondary); font-size:0.8rem; text-decoration:underline;">Ver Archivo (${sub.file_type.split('/')[1] || 'd'})</a>
+                                    
+                                    <div style="margin-top:0.5rem; display:flex; align-items:center; gap:0.5rem; justify-content:flex-end;">
+                                        <input id="grade-${sub.id}" type="number" placeholder="Nota" style="width:60px; padding:2px; background:rgba(0,0,0,0.5); color:white; border:1px solid gray;" value="${sub.grade || ''}">
+                                        <button class="btn btn-primary" style="padding:2px 8px; font-size:0.7rem;" onclick="gradeSubmission(${sub.id})">Guardar Nota</button>
+                                    </div>
+                                    <div style="font-size:0.7rem; color:gray; margin-top:0.2rem;">${sub.grade ? `Nota actual: ${sub.grade}` : 'Sin calificar'}</div>
+
+                                ` : '<div style="color:#facc15; font-size:0.9rem;">⚠️ Pendiente</div>'}
+                            </div>
+                        </div>
+                        `;
+        }).join('')}
+                </div>
+            </div>
+        `;
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+window.gradeSubmission = async (subId) => {
+    const gradeVal = document.getElementById(`grade-${subId}`).value;
+    if (gradeVal === '') return showToast('Ingresa una nota', 'error');
+
+    try {
+        await apiRequest(`/v1/submissions/${subId}/grade`, 'POST', { grade: gradeVal });
+        showToast('Nota guardada', 'success');
+    } catch (e) { showToast(e.message, 'error'); }
+};
+
+// --- ADMIN VIEW ---
+window.renderAdminHomeworkView = (area) => {
+    area.innerHTML = '<div id="admin-student-list"></div>';
+    renderHomeworkStudentList(document.getElementById('admin-student-list'));
+};
+
+// --- SHARED STUDENT LIST (Prof/Admin) ---
+window.renderHomeworkStudentList = (container) => {
+    if (!window.currentCourseProgress) return;
+    const students = window.currentCourseProgress; // We use progress roster for list
+
+    if (students.length === 0) {
+        container.innerHTML = '<p>No hay estudiantes matriculados.</p>';
+        return;
+    }
+
+    container.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:0.5rem;">
+            ${students.map(s => `
+                <div style="display:flex; justify-content:space-between; align-items:center; padding:0.8rem; background:rgba(255,255,255,0.02); border-bottom:1px solid rgba(255,255,255,0.05); border-radius:8px;">
+                    <div>
+                        <div style="font-weight:bold;">${s.full_name}</div>
+                        <div style="font-size:0.8rem; color:#94a3b8;">${s.email}</div>
+                    </div>
+                    <button class="btn btn-primary" style="padding:0.3rem 0.8rem; font-size:0.9rem;" onclick="viewStudentHomework(${s.student_id}, '${s.full_name}')">Ver Deberes</button>
+                </div>
+            `).join('')}
+        </div>
+    `;
+};
+
+// --- VIEW STUDENT SUBMISSIONS (Admin/Prof Logic) ---
+window.viewStudentHomework = async (studentId, studentName) => {
+    const area = document.getElementById('homework-area');
+    area.innerHTML = '<p>Cargando entregas...</p>';
+
+    try {
+        const res = await apiRequest(`/v1/courses/${window.currentCourseId}/students/${studentId}/submissions`);
+        const items = res.data || [];
+
+        let content = '';
+        if (items.length === 0) {
+            content = '<div class="glass-card"><p>Aún no hay asignaciones en esta zona de deberes.</p></div>';
+        } else {
+            content = items.map(item => {
+                const a = item.assignment;
+                const s = item.submission;
+
+                let statusHtml = '<span style="color:orange">Pendiente</span>';
+                if (s) statusHtml = `<span style="color:lightgreen">Entregado: ${new Date(s.submitted_at).toLocaleDateString()}</span>`;
+
+                return `
+                <div class="glass-card" style="margin-bottom:1rem; border-left:4px solid var(--primary);">
+                    <h4 style="margin-bottom:0.5rem;">${a.title}</h4>
+                    <p style="font-size:0.9rem; color:#cbd5e1; margin-bottom:0.5rem;">${a.description || ''}</p>
+                    <div style="font-size:0.9rem; margin-bottom:1rem;">Estado: ${statusHtml}</div>
+                    ${s ? `
+                        <div style="background:rgba(0,0,0,0.3); padding:0.5rem; border-radius:4px;">
+                            <a href="${s.file_url}" target="_blank" class="btn btn-secondary" style="font-size:0.8rem;">📄 Ver Archivo (${s.file_type.split('/')[1] || 'file'})</a>
+                        </div>
+                    ` : ''}
+                </div>`;
+            }).join('');
+        }
+
+        area.innerHTML = `
+            <button class="btn btn-secondary" style="margin-bottom:1rem;" onclick="renderHomeworkTab(window.currentCourseId)">⬅ Volver a Lista</button>
+            <h3 style="margin-bottom:1rem; color:var(--primary);">Deberes de: ${studentName}</h3>
+            ${content}
+        `;
+
+    } catch (e) {
+        area.innerHTML = `<p style="color:red">Error: ${e.message}</p> <button class="btn btn-secondary" onclick="renderHomeworkTab(window.currentCourseId)">Volver</button>`;
+    }
+};
+
+// --- STUDENT VIEW (Assignments List + Upload) ---
+window.renderStudentAssignments = (area) => {
+    const assignments = window.currentAssignments || [];
+
+    if (assignments.length === 0) {
+        area.innerHTML = '<div class="glass-card"><p>No hay deberes asignados por el profesor.</p></div>';
+        return;
+    }
+
+    area.innerHTML = `
+        <div style="display:flex; flex-direction:column; gap:1.5rem;">
+            ${assignments.map(a => {
+        const sub = a.submission; // Attached in backend getCourseAssignments
+        return `
+                <div class="glass-card">
+                     <div style="display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:1rem;">
+                        <div>
+                            <h3 style="color:var(--primary); margin-bottom:0.5rem;">${a.title}</h3>
+                            <p style="color:#cbd5e1;">${a.description || ''}</p>
+                            <div style="font-size:0.8rem; color:gray; margin-top:0.5rem;">Asignado: ${new Date(a.created_at).toLocaleDateString()}</div>
+                        </div>
+                        ${sub ? '<span style="background:green; color:white; padding:2px 8px; border-radius:4px; font-size:0.8rem;">Entregado</span>' : '<span style="background:orange; color:white; padding:2px 8px; border-radius:4px; font-size:0.8rem;">Pendiente</span>'}
+                     </div>
+
+                     <div style="background:rgba(255,255,255,0.05); padding:1rem; border-radius:8px;">
+                        ${sub ? `
+                            <p style="margin-bottom:0.5rem;"><strong>Tu entrega:</strong></p>
+                            <a href="${sub.file_url}" target="_blank" style="color:var(--secondary); text-decoration:underline;">Ver archivo enviado</a>
+                            <p style="font-size:0.8rem; color:gray; margin-top:0.5rem;">Enviado el: ${new Date(sub.submitted_at).toLocaleString()}</p>
+                            <button class="btn btn-secondary" style="font-size:0.8rem; margin-top:1rem;" onclick="toggleUploadForm(${a.id})">Re-enviar</button>
+                        ` : `
+                            <p style="margin-bottom:0.5rem;">Subir tarea (PDF o Video):</p>
+                        `}
+                        
+                        <div id="upload-form-${a.id}" class="${sub ? 'hidden' : ''}" style="margin-top:1rem;">
+                            <input type="file" id="file-${a.id}" accept=".pdf,video/*" style="color:white; margin-bottom:0.5rem;">
+                            <button class="btn btn-primary" onclick="submitAssignment(${a.id})">Enviar Tarea</button>
+                        </div>
+                     </div>
+                </div>
+                `;
+    }).join('')}
+        </div>
+    `;
+};
+
+window.toggleUploadForm = (id) => {
+    const el = document.getElementById(`upload-form-${id}`);
+    if (el) el.classList.toggle('hidden');
+};
+
+window.submitAssignment = async (assignmentId) => {
+    const fileInput = document.getElementById(`file-${assignmentId}`);
+    if (fileInput.files.length === 0) return showToast('Selecciona un archivo', 'error');
+
+    const file = fileInput.files[0];
+    const maxSize = 50 * 1024 * 1024; // 50MB
+    if (file.size > maxSize) return showToast('El archivo es demasiado grande (Máx 50MB)', 'error');
+
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const btn = document.querySelector(`#upload-form-${assignmentId} button`);
+    const originalText = btn.innerText;
+    btn.innerText = 'Subiendo...';
+    btn.disabled = true;
+
+    try {
+        const res = await fetch(`/api/v1/assignments/${assignmentId}/submit`, {
+            method: 'POST',
+            headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` },
+            body: formData
+        });
+
+        const data = await res.json().catch(() => ({})); // Handle non-JSON responses
+
+        if (res.ok && data.success) {
+            showToast('Deber enviado correctamente', 'success');
+            enterCourse(window.currentCourseId);
+        } else {
+            // Prefer server message, fallback to status text
+            const msg = data.message || `Error del servidor: ${res.status} ${res.statusText}`;
+            showToast(msg, 'error');
+        }
+    } catch (e) {
+        console.error(e);
+        showToast('Error de red o conexión fallida', 'error');
+    } finally {
+        if (btn) {
+            btn.innerText = originalText;
+            btn.disabled = false;
+        }
+    }
+};
+
+// ==========================================
+// CUSTOM UI MODALS (Toast, Confirm, Prompt)
+// ==========================================
+
+const style = document.createElement('style');
+style.textContent = `
+    @keyframes slideInDown { from { transform: translateY(-100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+    @keyframes fadeOut { from { opacity: 1; } to { opacity: 0; } }
+    .toast-container { position: fixed; top: 20px; left: 50%; transform: translateX(-50%); z-index: 10000; display: flex; flex-direction: column; gap: 10px; pointer-events: none; }
+    .custom-toast { 
+        background: rgba(15, 23, 42, 0.95); 
+        border: 1px solid rgba(255,255,255,0.1); 
+        backdrop-filter: blur(10px);
+        color: white; 
+        padding: 0.8rem 1.5rem; 
+        border-radius: 50px; 
+        box-shadow: 0 10px 25px rgba(0,0,0,0.5); 
+        display: flex; align-items: center; gap: 12px;
+        animation: slideInDown 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275) forwards;
+        min-width: 300px;
+        pointer-events: auto;
+    }
+    .custom-toast.success { border: 1px solid #22c55e; box-shadow: 0 0 15px rgba(34, 197, 94, 0.3); }
+    .custom-toast.error { border: 1px solid #ef4444; box-shadow: 0 0 15px rgba(239, 68, 68, 0.3); }
+`;
+document.head.appendChild(style);
+
+const toastContainer = document.createElement('div');
+toastContainer.className = 'toast-container';
+document.body.appendChild(toastContainer);
+
+window.showToast = (message, type = 'info') => {
+    const toast = document.createElement('div');
+    toast.className = `custom-toast ${type}`;
+    let icon = 'ℹ️';
+    if (type === 'success') icon = '✅';
+    if (type === 'error') icon = '❌';
+    toast.innerHTML = `<span style="font-size:1.2rem;">${icon}</span> <span style="font-weight:500;">${message}</span>`;
+    toastContainer.appendChild(toast);
+    setTimeout(() => {
+        toast.style.animation = 'fadeOut 0.5s ease-out forwards';
+        setTimeout(() => toast.remove(), 500);
+    }, 3000);
+};
+
+window.showConfirm = (message) => {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; animation: fadeIn 0.2s;';
+        modal.innerHTML = `
+            <div class="glass-card" style="width:400px; max-width:90%; border:1px solid rgba(255,255,255,0.1);">
+                <h3 style="margin-bottom:1rem; color:var(--primary);">Confirmación</h3>
+                <p style="margin-bottom:2rem; color:#cbd5e1; font-size:1.05rem;">${message}</p>
+                <div style="display:flex; justify-content:flex-end; gap:1rem;">
+                    <button id="btn-cancel" class="btn btn-secondary">Cancelar</button>
+                    <button id="btn-ok" class="btn btn-primary">Aceptar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        const close = (val) => { modal.remove(); resolve(val); };
+        modal.querySelector('#btn-cancel').onclick = () => close(false);
+        modal.querySelector('#btn-ok').onclick = () => close(true);
+    });
+};
+
+window.showPrompt = (message, defaultVal = '') => {
+    return new Promise((resolve) => {
+        const modal = document.createElement('div');
+        modal.className = 'modal-overlay';
+        modal.style.cssText = 'position:fixed; inset:0; background:rgba(0,0,0,0.8); z-index:10000; display:flex; justify-content:center; align-items:center; animation: fadeIn 0.2s;';
+        modal.innerHTML = `
+            <div class="glass-card" style="width:400px; max-width:90%; border:1px solid rgba(255,255,255,0.1);">
+                <h3 style="margin-bottom:1rem; color:var(--primary);">${message}</h3>
+                <input id="prompt-input" type="text" value="${defaultVal}" style="width:100%; padding:0.8rem; margin-bottom:1.5rem; background:rgba(0,0,0,0.3); border:1px solid rgba(255,255,255,0.2); color:white; border-radius:8px;">
+                <div style="display:flex; justify-content:flex-end; gap:1rem;">
+                    <button id="btn-cancel" class="btn btn-secondary">Cancelar</button>
+                    <button id="btn-ok" class="btn btn-primary">Aceptar</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        const input = modal.querySelector('input');
+        input.focus();
+
+        const close = (val) => { modal.remove(); resolve(val); };
+        modal.querySelector('#btn-cancel').onclick = () => close(null);
+        modal.querySelector('#btn-ok').onclick = () => close(input.value);
+        input.onkeydown = (e) => {
+            if (e.key === 'Enter') close(input.value);
+            if (e.key === 'Escape') close(null);
+        };
+    });
 };

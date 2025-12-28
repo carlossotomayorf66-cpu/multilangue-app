@@ -11,6 +11,27 @@ exports.createUnit = async (req, res) => {
     }
 };
 
+exports.updateUnit = async (req, res) => {
+    try {
+        const { id } = req.params;
+        const { title } = req.body;
+        await pool.query('UPDATE units SET title = ? WHERE id = ?', [title, id]);
+        res.json({ success: true, message: 'Unidad actualizada' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
+exports.deleteUnit = async (req, res) => {
+    try {
+        const { id } = req.params;
+        await pool.query('DELETE FROM units WHERE id = ?', [id]);
+        res.json({ success: true, message: 'Unidad eliminada' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 exports.createActivity = async (req, res) => {
     const connection = await pool.getConnection();
     try {
@@ -45,6 +66,90 @@ exports.createActivity = async (req, res) => {
     }
 };
 
+exports.updateActivity = async (req, res) => {
+    const connection = await pool.getConnection();
+    try {
+        await connection.beginTransaction();
+        const { id } = req.params;
+        const { title, description, content_url, max_score, due_date, questions } = req.body;
+
+        // 1. Update basic info
+        await connection.query(
+            'UPDATE activities SET title = ?, description = ?, content_url = ?, max_score = ?, due_date = ? WHERE id = ?',
+            [title, description, content_url, max_score, due_date, id]
+        );
+
+        // 2. If questions provided, replace them (Full overwrite strategy is easiest for MVP)
+        if (questions) {
+            // Get current type
+            const [act] = await connection.query('SELECT type FROM activities WHERE id = ?', [id]);
+            if (act.length === 0) throw new Error('Actividad no encontrada');
+
+            if (act[0].type === 'QUIZ') {
+                // Delete old questions (and options via cascade if set, otherwise manual)
+                // Assuming DB has ON DELETE CASCADE for options -> questions.
+                // But let's be safe: delete options first? 
+                // Actually deleting questions should cascade to options if FK exists.
+                // Let's invoke delete where activity_id matches.
+
+                // First get old q ids to clean up options manually just in case
+                const [oldQs] = await connection.query('SELECT id FROM activity_questions WHERE activity_id = ?', [id]);
+                const oldQIds = oldQs.map(q => q.id);
+                if (oldQIds.length > 0) {
+                    await connection.query(`DELETE FROM activity_options WHERE question_id IN (${oldQIds.join(',')})`);
+                    await connection.query('DELETE FROM activity_questions WHERE activity_id = ?', [id]);
+                }
+
+                // Insert new
+                for (const q of questions) {
+                    const [qRes] = await connection.query('INSERT INTO activity_questions (activity_id, question_text) VALUES (?, ?)', [id, q.text]);
+                    const qId = qRes.insertId;
+                    for (const opt of q.options) {
+                        await connection.query('INSERT INTO activity_options (question_id, option_text, is_correct) VALUES (?, ?, ?)',
+                            [qId, opt.text, opt.isCorrect]);
+                    }
+                }
+            }
+        }
+
+        await connection.commit();
+        res.json({ success: true, message: 'Actividad actualizada' });
+    } catch (error) {
+        await connection.rollback();
+        res.status(500).json({ success: false, message: error.message });
+    } finally {
+        connection.release();
+    }
+};
+
+exports.deleteActivity = async (req, res) => {
+    try {
+        const { id } = req.params;
+        // Cascading deletion should be handled by DB, but let's be explicit if needed.
+        // Assuming ON DELETE CASCADE on questions/options/submissions.
+        // If not, we might error. Let's try simple delete first.
+
+        // Manual cleanup to be safe:
+        // 1. Delete Submissions
+        await pool.query('DELETE FROM submissions WHERE activity_id = ?', [id]);
+
+        // 2. Delete Questions/Options (If Quiz)
+        const [qs] = await pool.query('SELECT id FROM activity_questions WHERE activity_id = ?', [id]);
+        if (qs.length > 0) {
+            const qIds = qs.map(q => q.id);
+            await pool.query(`DELETE FROM activity_options WHERE question_id IN (${qIds.join(',')})`);
+            await pool.query('DELETE FROM activity_questions WHERE activity_id = ?', [id]);
+        }
+
+        // 3. Delete Activity
+        await pool.query('DELETE FROM activities WHERE id = ?', [id]);
+
+        res.json({ success: true, message: 'Actividad eliminada' });
+    } catch (error) {
+        res.status(500).json({ success: false, message: error.message });
+    }
+};
+
 exports.getActivity = async (req, res) => {
     try {
         const { id } = req.params;
@@ -65,18 +170,32 @@ exports.getActivity = async (req, res) => {
                     options: opts.filter(o => o.question_id === q.id).map(o => ({
                         id: o.id,
                         text: o.option_text,
-                        is_correct: o.is_correct // Will be filtered for students if needed
+                        is_correct: o.is_correct
                     }))
                 }));
             } else {
                 activity.questions = [];
             }
 
-            // Security: Hide correct answers from students
+            // Security: Hide correct answers from students UNLESS they completed it
             if (req.user && req.user.role === 'ESTUDIANTE') {
-                activity.questions.forEach(q => {
-                    q.options.forEach(o => delete o.is_correct);
-                });
+                // Check if completed submission exists
+                const [subs] = await pool.query('SELECT status FROM submissions WHERE activity_id = ? AND student_id = ?', [id, req.user.id]);
+                const isCompleted = subs.length > 0 && subs[0].status === 'COMPLETED';
+
+                if (!isCompleted) {
+                    activity.questions.forEach(q => {
+                        q.options.forEach(o => delete o.is_correct);
+                    });
+                }
+            }
+        }
+
+        // [NEW] Get student's previous submission if exists
+        if (req.user && req.user.role === 'ESTUDIANTE') {
+            const [subs] = await pool.query('SELECT * FROM submissions WHERE activity_id = ? AND student_id = ?', [id, req.user.id]);
+            if (subs.length > 0) {
+                activity.last_submission = subs[0];
             }
         }
 
@@ -88,7 +207,7 @@ exports.getActivity = async (req, res) => {
 
 exports.submitActivity = async (req, res) => {
     try {
-        const { activity_id, content } = req.body; // content is JSON string for quizzes
+        const { activity_id, content, status = 'COMPLETED' } = req.body; // status: 'IN_PROGRESS' or 'COMPLETED'
         const student_id = req.user.id;
 
         // Check type to auto-grade
@@ -96,7 +215,8 @@ exports.submitActivity = async (req, res) => {
         let grade = null;
         let feedback = null;
 
-        if (act.length && act[0].type === 'QUIZ') {
+        // Only grade if COMPLETED and it is a QUIZ
+        if (status === 'COMPLETED' && act.length && act[0].type === 'QUIZ') {
             try {
                 const answers = JSON.parse(content); // { questionId: optionId }
 
@@ -128,14 +248,19 @@ exports.submitActivity = async (req, res) => {
         );
 
         if (existing.length > 0) {
-            await pool.query('UPDATE submissions SET content = ?, grade = COALESCE(?, grade), feedback = COALESCE(?, feedback), submitted_at = NOW() WHERE id = ?',
-                [content, grade, feedback, existing[0].id]);
+            // If updating, only update grade if we calculated one (kept as null if in_progress)
+            // If status is IN_PROGRESS, grade becomes NULL (or keeps previous? Standard is clear grade if re-saving in progress? Or keeps null).
+            // Actually, if I pause, I shouldn't overwrite a valid grade if I had one? 
+            // User requirement: "si quiere volver a hacer... se va a reemplazar su progreso".
+            // So yes, overwrite.
+            await pool.query('UPDATE submissions SET content = ?, grade = ?, feedback = ?, status = ?, submitted_at = NOW() WHERE id = ?',
+                [content, grade, feedback, status, existing[0].id]);
         } else {
-            await pool.query('INSERT INTO submissions (activity_id, student_id, content, grade, feedback) VALUES (?, ?, ?, ?, ?)',
-                [activity_id, student_id, content, grade, feedback]);
+            await pool.query('INSERT INTO submissions (activity_id, student_id, content, grade, feedback, status) VALUES (?, ?, ?, ?, ?, ?)',
+                [activity_id, student_id, content, grade, feedback, status]);
         }
 
-        res.json({ success: true, message: 'Actividad entregada', grade });
+        res.json({ success: true, message: status === 'COMPLETED' ? 'Actividad entregada' : 'Progreso guardado', grade });
     } catch (error) {
         res.status(500).json({ success: false, message: error.message });
     }

@@ -13,19 +13,7 @@ module.exports = (io) => {
             });
         });
 
-        // Señalización WebRTC
-        socket.on('offer', (payload) => {
-            // payload: { target, caller, sdp }
-            io.to(String(payload.target)).emit('offer', payload);
-        });
 
-        socket.on('answer', (payload) => {
-            io.to(String(payload.target)).emit('answer', payload);
-        });
-
-        socket.on('ice-candidate', (incoming) => {
-            io.to(String(incoming.target)).emit('ice-candidate', incoming);
-        });
 
         // Chat
         socket.on('send-chat-message', (roomId, messageData) => {
@@ -38,13 +26,6 @@ module.exports = (io) => {
             socket.to(roomId).emit('reaction', reaction);
         });
 
-        // Grabación (Solo notifica estado)
-        socket.on('recording-started', (roomId) => {
-            socket.to(roomId).emit('recording-status', true);
-        });
 
-        socket.on('recording-stopped', (roomId) => {
-            socket.to(roomId).emit('recording-status', false);
-        });
     });
 };

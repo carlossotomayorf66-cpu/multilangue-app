@@ -8,7 +8,7 @@
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;900&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="css/style.css">
     <link rel="stylesheet" href="css/mobile.css">
-    <link rel="stylesheet" href="css/video_room.css">
+
     <script src="/socket.io/socket.io.js"></script>
 </head>
 
@@ -126,109 +126,10 @@
 
     </section>
 
-    <!-- Video Room -->
-    <div id="video-room" class="hidden video-room-layout">
-        <!-- Main Video Area -->
-        <div class="video-main">
-            <div class="video-header">
-                <h3>🔴 Clase en Vivo</h3>
-                <!-- Button removed, moved to bottom bar -->
-            </div>
 
-            <div class="video-grid-container" id="video-grid">
-                <!-- Local Video -->
-                <div class="video-wrapper">
-                    <video id="local-video" autoplay muted playsinline></video>
-                    <span class="video-label">Tú</span>
-                </div>
-            </div>
-
-            <div class="video-controls-bar">
-                <button class="control-btn" onclick="toggleMute()" id="btn-mute" title="Mutear/Desmutear">
-                    <!-- Icon Mic -->
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" class="icon-mic" stroke="currentColor"
-                        stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"></path>
-                        <path d="M19 10v2a7 7 0 0 1-14 0v-2"></path>
-                        <line x1="12" y1="19" x2="12" y2="23"></line>
-                        <line x1="8" y1="23" x2="16" y2="23"></line>
-                    </svg>
-                    <!-- Icon Mute Off (hidden by default) -->
-                </button>
-                <button class="control-btn" onclick="toggleVideo()" id="btn-video" title="Cámara On/Off">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M23 7l-7 5 7 5V7z"></path>
-                        <rect x="1" y="5" width="15" height="14" rx="2" ry="2"></rect>
-                    </svg>
-                </button>
-                <button class="control-btn" onclick="shareScreen()" id="btn-share" title="Compartir Pantalla">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M2 3h20v14a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V3z"></path>
-                        <path d="M8 21h8"></path>
-                        <path d="M12 17v4"></path>
-                    </svg>
-                </button>
-                <button class="control-btn danger" onclick="toggleRecording()" id="btn-rec" title="Grabar Clase"
-                    style="color:white">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 12a9 9 0 1 1-9-9 9 9 0 0 1 9 9z"></path>
-                        <circle cx="12" cy="12" r="3" fill="currentColor"></circle>
-                    </svg>
-                </button>
-                <button class="control-btn" onclick="toggleSidebar()" id="btn-sidebar" title="Chat y Participantes">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"></path>
-                    </svg>
-                </button>
-                <button class="control-btn hangup" onclick="leaveRoom()" title="Colgar Llamada">
-                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
-                        stroke-linecap="round" stroke-linejoin="round">
-                        <path
-                            d="M10.68 13.31a16 16 0 0 0 3.41 2.6l1.27-1.27a2 2 0 0 1 2.11-.45 12.84 12.84 0 0 0 2.81.7 2 2 0 0 1 1.72 2v3a2 2 0 0 1-2.18 2 19.79 19.79 0 0 1-8.63-3.07 19.42 19.42 0 0 1-3.33-2.67m-2.67-3.34a19.79 19.79 0 0 1-3.07-8.63A2 2 0 0 1 4.11 2h3a2 2 0 0 1 2 1.72 12.84 12.84 0 0 0 .7 2.81 2 2 0 0 1-.45 2.11L8.09 9.91">
-                        </path>
-                        <line x1="23" y1="1" x2="1" y2="23"></line>
-                    </svg>
-                </button>
-            </div>
-        </div>
-
-        <!-- Right Sidebar -->
-        <div class="video-sidebar collapsed" id="video-sidebar">
-            <div class="sidebar-tabs" style="position:relative;">
-                <button class="tab-btn active" onclick="switchVideoTab('chat')">Chat</button>
-                <button class="tab-btn" onclick="switchVideoTab('participants')">Participantes</button>
-                <button onclick="toggleSidebar()"
-                    style="background:none; border:none; color:white; padding:0 1rem; cursor:pointer; font-size:1.2rem; display:flex; align-items:center;"
-                    title="Minimizar">
-                    &times;
-                </button>
-            </div>
-
-            <div id="v-tab-chat" class="sidebar-content">
-                <div id="chat-messages" class="chat-messages">
-                    <!-- Messages go here -->
-                </div>
-                <div class="chat-input-area">
-                    <input type="text" id="chat-input" placeholder="Escribe un mensaje...">
-                </div>
-            </div>
-
-            <div id="v-tab-participants" class="sidebar-content hidden">
-                <h4 style="color:var(--secondary); margin-bottom:1rem; font-size:0.9rem;">En esta llamada</h4>
-                <div id="list-connected" class="participant-list"></div>
-
-                <h4 style="color:#64748b; margin:1rem 0 0.5rem; font-size:0.9rem;">Ausentes</h4>
-                <div id="list-absent" class="participant-list"></div>
-            </div>
-        </div>
-    </div>
 
     <script src="js/api.js"></script>
-    <script src="js/webrtc.js"></script>
+
     <script src="js/app.js"></script>
 </body>
 
